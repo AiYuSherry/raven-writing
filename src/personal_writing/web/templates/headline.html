@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>标题工坊</h1>
-<div style="display:flex;gap:20px;margin:0 0 12px;padding-bottom:6px;border-bottom:1.2px solid var(--line);font-size:13px;font-weight:600;letter-spacing:1px;">
-    <a href="#section-generate" style="color:var(--ink);text-decoration:none;padding:4px 0;border-bottom:2px solid var(--theme);margin-bottom:-7px;">标题生成</a>
-    <a href="#section-accumulate" style="color:var(--muted);text-decoration:none;padding:4px 0;">标题积累</a>
+<div style="display:flex;gap:12px;margin:0 0 16px;">
+    <a href="#section-generate" style="flex:1;display:block;text-align:center;padding:14px 0;font-size:17px;font-weight:700;text-decoration:none;border-radius:10px;background:var(--theme);color:#fff;letter-spacing:2px;">标题生成</a>
+    <a href="#section-accumulate" style="flex:1;display:block;text-align:center;padding:14px 0;font-size:17px;font-weight:700;text-decoration:none;border-radius:10px;background:var(--surface-soft);color:var(--ink);letter-spacing:2px;border:1.2px solid var(--line);">标题积累</a>
 </div>
 <div id="section-generate"></div>
 <form method="POST">
