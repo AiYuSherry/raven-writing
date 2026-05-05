@@ -482,6 +482,10 @@ def write_readme():
     """Write README.md."""
     readme = r"""# 乌鸦写作台
 
+[中文](#中文) | [English](#english)
+
+## 中文
+
 乌鸦写作台是一个本地优先的 AI 写作工作台。它把素材导入、风格生成、文章修改、标题训练、Obsidian 存档、微信公众号排版和推送放在同一个界面里，适合公众号长文、日常随笔、短科普、小红书笔记等多平台写作。
 
 它的核心目标不是做一个通用聊天框，而是把一套个人写作流程固定下来：上传素材，选择风格，生成初稿，挑标题，反复修改，存档复盘，最后排版发布。
@@ -727,6 +731,149 @@ WECHAT_AUTHOR=作者名
 - 公众号推送依赖微信后台配置和 IP 白名单。
 - 图片和文字交错写作仍需要继续优化，复杂 Obsidian 粘贴内容可能需要手动检查。
 - 生成质量高度依赖风格 prompt 和输入素材，建议先用自己的作品调好风格，再用于正式写作。
+
+---
+
+## English
+
+Raven Writing Desk is a local-first AI writing workspace for automated, personalized writing workflows. It brings material intake, style generation, article revision, headline analysis, Obsidian archiving, WeChat article typesetting, and draft publishing into one focused interface.
+
+It is not a general chat box. It is designed around a repeatable writing pipeline: collect material, choose a style, generate a draft, refine the article, pick or improve headlines, archive the final version, and publish when ready.
+
+## Core Features
+
+### Writing Workspace
+
+- Paste text, upload files, and import writing materials.
+- Generate multiple article versions with different writing styles.
+- See the style attached to each generated article, then revise and archive each version independently.
+- Continue revising articles while keeping the edit request and detected changes visible.
+- Apply hard constraints to reduce AI-flavored phrasing, banned sentence patterns, and cross-style leakage.
+
+### Style System
+
+- Includes four built-in styles: Khazix long-form WeChat articles, Daily Notes, Short Explainers, and Xiaohongshu Notes.
+- Create custom styles from your own writing samples, reference files, or SKILL.md files.
+- Edit prompts, reference materials, and style descriptions in the web UI.
+- The Khazix display style keeps the internal `sherry` style id for compatibility and still runs through the Sherry skill path.
+
+### Headline Workshop
+
+- Generate multiple headline candidates for each article.
+- Save good headlines you encounter in daily reading and organize them by category.
+- Add headlines one by one or in batches.
+- Periodically ask AI to analyze the headline library, extract reusable patterns, and add strong patterns to the headline formula library.
+- Future headline generation can then draw from these formulas, making candidates closer to your taste and platform needs.
+
+### Review, Archive, and Stats
+
+- Keep history for materials, sessions, article versions, and revisions.
+- Archive final Markdown versions to Obsidian or any configured folder.
+- Preserve draft/final differences for later review and prompt improvement.
+- Track writing counts and style distribution.
+
+### WeChat Typesetting and Publishing
+
+- Bundles the `wechat-typeset-pro` skill.
+- Converts Markdown into WeChat-compatible HTML.
+- Provides multi-theme previews.
+- Can push selected results to the WeChat Official Account draft box after credentials are configured.
+
+## Quick Start
+
+### 1. Install Python Dependencies
+
+```bash
+pip install -r requirements.txt
+# or
+pip install -e .
+```
+
+### 2. Install Claude Code
+
+Raven Writing Desk uses Claude Code CLI as the default writing engine.
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+### 3. Start the Web App
+
+```bash
+python -m personal_writing.web.app
+# or
+personal-writing web
+```
+
+Open `http://localhost:5000` in your browser.
+
+## Built-In Prompts
+
+| File | Style | Included |
+|------|-------|----------|
+| `prompts/sherry.md` | Khazix long-form WeChat articles | Yes |
+| `prompts/daily.md` | Daily Notes | Yes |
+| `prompts/short_science.md` | Short Explainers | Yes |
+| `prompts/xiaohongshu.md` | Xiaohongshu Notes | Yes |
+
+You can create more custom styles from the web UI by uploading SKILL.md files, reference articles, or manually writing prompts.
+
+## Common Workflows
+
+### From Material to Article
+
+1. Paste text or upload files in the writing workspace.
+2. Select one or more writing styles.
+3. Generate drafts and revise each style-specific result independently.
+4. Pick a generated headline or write your own.
+5. Export Markdown or archive the final version to Obsidian.
+
+### From Good Headlines to Better Headline Generation
+
+1. Save strong headlines you encounter into the Headline Workshop.
+2. Tag them by theme, platform, or content type.
+3. Periodically ask AI to summarize headline patterns.
+4. Add effective patterns to the formula library.
+5. Use the accumulated formulas to improve future headline candidates.
+
+### From Article to WeChat Draft
+
+1. Generate or paste a Markdown article.
+2. Preview it with the built-in WeChat typesetting themes.
+3. Configure WeChat credentials in Settings or environment variables.
+4. Push the formatted article to the WeChat draft box.
+
+## Environment Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `WRITING_STYLES_DIR` | Prompt directory | `./prompts/` |
+| `PERSONAL_WRITING_ROOT` | Project root override | Auto-detected |
+| `PERSONAL_WRITING_DATA` | Database directory | `{project_root}/data` |
+| `OBSIDIAN_VAULT_PATH` | Obsidian vault path | Auto-detected |
+| `ARCHIVE_OUTPUT_DIR` | Archive output directory | `{vault_path}/我的作品` |
+| `BLOG_NAME` | WeChat footer account name | Empty |
+| `WECHAT_COVER_IMAGE` | Default WeChat cover image | Auto-detected |
+| `WECHAT_TYPESET_DIR` | WeChat typeset skill path | `./skills/wechat-typeset-pro` |
+| `WECHAT_APP_ID` | WeChat Official Account AppID | Empty |
+| `WECHAT_APP_SECRET` | WeChat Official Account AppSecret | Empty |
+| `WECHAT_AUTHOR` | WeChat author name | Empty |
+
+## Privacy and Distribution
+
+- The app uses a local SQLite database by default.
+- Materials, drafts, and history are not uploaded to third-party servers by the app itself.
+- Packaged releases exclude personal data, drafts, private config, databases, `.DS_Store`, and cache files.
+- WeChat credentials should be configured through Settings or `.env`, never committed to the repository.
+
+## Tech Stack
+
+- Python 3.10+
+- Flask
+- SQLite
+- Claude Code CLI
+- Markdown
+- Requests
 
 ## 许可
 
