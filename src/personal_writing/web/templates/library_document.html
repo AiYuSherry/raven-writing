@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ document.title or document.original_filename or ('文档 #' ~ document.id) }}</h1>
+
+<div class="card">
+    <div class="meta">
+        <a href="/libraries/{{ library.id }}">返回 {{ library.name }}</a>
+        · {{ document.source_type }}
+        · {{ document.folder_name or '未分类' }}
+        · {{ document.parse_status }}
+        · {{ document.word_count or 0 }} 字
+    </div>
+    {% if document.parse_error %}
+    <div class="flash-error">{{ document.parse_error }}</div>
+    {% endif %}
+    <div style="font-size:13px;color:var(--muted);word-break:break-all;">{{ document.file_path }}</div>
+    {% if document.source_type == 'zotero' %}
+    <div style="margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;">
+        <div style="padding:10px 12px;border:1.2px solid var(--line);border-radius:8px;background:var(--surface-solid);">
+            <div class="meta" style="margin:0;">作者</div>
+            <div style="font-size:14px;">{{ document.author or '未填' }}</div>
+        </div>
+        <div style="padding:10px 12px;border:1.2px solid var(--line);border-radius:8px;background:var(--surface-solid);">
+            <div class="meta" style="margin:0;">年份 / 期刊</div>
+            <div style="font-size:14px;">{{ document.year or 'n.d.' }} · {{ document.publication_title or '未填' }}</div>
+        </div>
+        <div style="padding:10px 12px;border:1.2px solid var(--line);border-radius:8px;background:var(--surface-solid);">
+            <div class="meta" style="margin:0;">DOI</div>
+            <div style="font-size:14px;word-break:break-all;">{{ document.doi or '未填' }}</div>
+        </div>
+        <div style="padding:10px 12px;border:1.2px solid var(--line);border-radius:8px;background:var(--surface-solid);">
+            <div class="meta" style="margin:0;">附件/PDF</div>
+            <div style="font-size:14px;word-break:break-all;">{{ document.attachment_path or '未填' }}</div>
+        </div>
+    </div>
+    <div style="margin-top:14px;display:grid;gap:10px;">
+        <div style="padding:12px 14px;border:1.2px solid var(--line);border-radius:8px;background:var(--surface-soft);">
+            <div class="meta" style="margin-bottom:4px;">中文友好引用</div>
+            <div style="font-size:14px;line-height:1.75;">{{ zotero_citation_chinese or '暂无' }}</div>
+        </div>
+        <div style="padding:12px 14px;border:1.2px solid var(--line);border-radius:8px;background:var(--surface-soft);">
+            <div class="meta" style="margin-bottom:4px;">APA 简版</div>
+            <div style="font-size:14px;line-height:1.75;">{{ zotero_citation_apa or '暂无' }}</div>
+        </div>
+        {% if zotero_reference and (zotero_reference.abstract or zotero_reference.notes) %}
+        <div style="padding:12px 14px;border:1.2px solid var(--line);border-radius:8px;background:var(--surface-solid);">
+            <div class="meta" style="margin-bottom:4px;">摘要 / 笔记</div>
+            {% if zotero_reference.abstract %}<div style="font-size:14px;line-height:1.75;">{{ zotero_reference.abstract }}</div>{% endif %}
+            {% if zotero_reference.notes %}<div style="font-size:14px;line-height:1.75;margin-top:8px;">{{ zotero_reference.notes }}</div>{% endif %}
+        </div>
+        {% endif %}
+        {% if zotero_snippet %}
+        <div>
+            <div class="meta" style="margin-bottom:4px;">可复制引用素材</div>
+            <textarea readonly style="min-height:180px;font-size:14px;">{{ zotero_snippet }}</textarea>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% if document.text_preview %}
+    <div style="margin-top:14px;padding:14px;border:1.2px solid var(--line);border-radius:8px;background:var(--surface-soft);white-space:pre-wrap;font-size:14px;line-height:1.75;">{{ document.text_preview }}</div>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>文档索引卡</h2>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+        <span class="stat-badge"><strong>{{ source_guide.word_count }}</strong> 字</span>
+        {% if source_guide.page_count %}<span class="stat-badge"><strong>{{ source_guide.page_count }}</strong> 页</span>{% endif %}
+        <span class="stat-badge"><strong>{{ source_guide.chunk_count }}</strong> 切片</span>
+        <span class="stat-badge ready"><strong>{{ source_guide.parse_status }}</strong></span>
+    </div>
+    <div style="margin-bottom:12px;">
+        <div class="meta" style="margin-bottom:4px;">自动摘要</div>
+        <div style="font-size:14px;line-height:1.75;color:var(--ink-soft);">{{ source_guide.summary }}</div>
+    </div>
+    <div style="margin-bottom:12px;">
+        <div class="meta" style="margin-bottom:6px;">关键词 / 术语</div>
+        {% for keyword in source_guide.keywords %}
+        <span class="tag">{{ keyword }}</span>
+        {% else %}
+        <span class="meta">暂无关键词</span>
+        {% endfor %}
+    </div>
+    <div>
+        <div class="meta" style="margin-bottom:6px;">建议追问</div>
+        <div style="display:grid;gap:6px;">
+            {% for question in source_guide.suggested_questions %}
+            <div style="padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface-soft);font-size:14px;">{{ question }}</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>切片预览</h2>
+    {% if chunks %}
+    {% for chunk in chunks %}
+    <div style="padding:12px 0;border-top:1px solid var(--line);">
+        <div style="display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:13px;margin-bottom:4px;">
+            <span>chunk_id={{ chunk.id }} · #{{ chunk.chunk_index }} · {{ chunk.locator }} · {{ document.folder_name or '未分类' }}</span>
+            <span>{{ chunk.char_count }} 字</span>
+        </div>
+        <div style="white-space:pre-wrap;line-height:1.75;font-size:14px;">{{ chunk.text }}</div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="empty">暂无切片。</div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -21,6 +21,8 @@
                 <option value="warm" {{ 'selected' if style.config.get('tone') == 'warm' }}>温暖 warm</option>
                 <option value="objective" {{ 'selected' if style.config.get('tone') == 'objective' }}>客观 objective</option>
                 <option value="authoritative" {{ 'selected' if style.config.get('tone') == 'authoritative' }}>权威 authoritative</option>
+                <option value="academic" {{ 'selected' if style.config.get('tone') == 'academic' }}>学术 academic</option>
+                <option value="distilled" {{ 'selected' if style.config.get('tone') == 'distilled' }}>蒸馏 distilled</option>
             </select>
         </div>
         <div>
@@ -30,6 +32,8 @@
                 <option value="numbered_sections" {{ 'selected' if style.config.get('structure') == 'numbered_sections' }}>分节论述 numbered_sections</option>
                 <option value="pain_point_to_solution" {{ 'selected' if style.config.get('structure') == 'pain_point_to_solution' }}>痛点→方案 pain_point_to_solution</option>
                 <option value="hook_to_content" {{ 'selected' if style.config.get('structure') == 'hook_to_content' }}>钩子→内容 hook_to_content</option>
+                <option value="academic_paper" {{ 'selected' if style.config.get('structure') == 'academic_paper' }}>学术论文 academic_paper</option>
+                <option value="skill_driven" {{ 'selected' if style.config.get('structure') == 'skill_driven' }}>Skill 驱动 skill_driven</option>
             </select>
         </div>
         <div>
@@ -38,6 +42,7 @@
                 <option value="first_person" {{ 'selected' if style.config.get('personal_pronoun') == 'first_person' }}>第一人称 first_person</option>
                 <option value="second_person" {{ 'selected' if style.config.get('personal_pronoun') == 'second_person' }}>第二人称 second_person</option>
                 <option value="mixed" {{ 'selected' if style.config.get('personal_pronoun') == 'mixed' }}>混合 mixed</option>
+                <option value="none" {{ 'selected' if style.config.get('personal_pronoun') == 'none' }}>无 none</option>
             </select>
         </div>
         <div>
@@ -47,6 +52,7 @@
                 <option value="medium" {{ 'selected' if style.config.get('sentence_length') == 'medium' }}>中 medium</option>
                 <option value="short_to_medium" {{ 'selected' if style.config.get('sentence_length') == 'short_to_medium' }}>短-中 short_to_medium</option>
                 <option value="very_short" {{ 'selected' if style.config.get('sentence_length') == 'very_short' }}>极短 very_short</option>
+                <option value="long" {{ 'selected' if style.config.get('sentence_length') == 'long' }}>长 long</option>
             </select>
         </div>
         <div>
@@ -55,6 +61,7 @@
                 <option value="tight" {{ 'selected' if style.config.get('paragraph_density') == 'tight' }}>紧凑 tight</option>
                 <option value="normal" {{ 'selected' if style.config.get('paragraph_density') == 'normal' }}>正常 normal</option>
                 <option value="loose" {{ 'selected' if style.config.get('paragraph_density') == 'loose' }}>松散 loose</option>
+                <option value="dense" {{ 'selected' if style.config.get('paragraph_density') == 'dense' }}>高密度 dense</option>
             </select>
         </div>
         <div>
@@ -71,17 +78,7 @@
                 <option value="open_ended" {{ 'selected' if style.config.get('ending_style') == 'open_ended' }}>开放式 open_ended</option>
                 <option value="summary" {{ 'selected' if style.config.get('ending_style') == 'summary' }}>总结 summary</option>
                 <option value="emotional" {{ 'selected' if style.config.get('ending_style') == 'emotional' }}>情感升华 emotional</option>
-            </select>
-        </div>
-    </div>
-    <div style="margin-top:12px;display:flex;gap:12px;align-items:center;">
-        <div>
-            <label style="display:block;color:#888;margin-bottom:2px;font-size:13px;">输出形态</label>
-            <select id="cfg_output_form" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;background:#fff;">
-                <option value="auto" {{ 'selected' if style.config.get('output_form', 'auto') == 'auto' }}>自动判断 auto</option>
-                <option value="文章" {{ 'selected' if style.config.get('output_form') == '文章' }}>文章</option>
-                <option value="歌词" {{ 'selected' if style.config.get('output_form') == '歌词' }}>歌词</option>
-                <option value="诗歌" {{ 'selected' if style.config.get('output_form') == '诗歌' }}>诗歌</option>
+                <option value="theoretical_summary" {{ 'selected' if style.config.get('ending_style') == 'theoretical_summary' }}>理论收束 theoretical_summary</option>
             </select>
         </div>
     </div>
@@ -152,39 +149,9 @@
     </div>
 </div>
 
-{% if style.orphaned_examples %}
-<div class="card" style="border-color:var(--accent);">
-    <h2 style="color:var(--accent);">未关联素材</h2>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">以下素材所属的风格已被删除，可认领到当前风格</div>
-    <div id="orphanedList">
-        {% for ex in style.orphaned_examples %}
-        <div class="orphaned-example-item" data-id="{{ ex.id }}" style="padding:12px 14px;background:var(--surface-solid);border:1.2px solid var(--line);border-radius:7px;margin-bottom:8px;">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-                <div style="flex:1;">
-                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
-                        {% if ex.title %}<div style="font-weight:650;font-size:14px;">{{ ex.title }}</div>{% endif %}
-                        <span style="font-size:12px;color:var(--muted);">{{ ex.content|length }} 字</span>
-                    </div>
-                    <div style="font-size:13px;color:var(--ink-soft);line-height:1.7;white-space:pre-wrap;max-height:100px;overflow:hidden;">{{ ex.content[:300] }}{% if ex.content|length > 300 %}...{% endif %}</div>
-                </div>
-                <div style="display:flex;gap:6px;flex-shrink:0;margin-left:10px;">
-                    <button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;" type="button" onclick="reclaimExample({{ ex.id }})">认领</button>
-                    <button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;" type="button" onclick="deleteExample({{ ex.id }})">删除</button>
-                </div>
-            </div>
-        </div>
-        {% endfor %}
-    </div>
-    <div style="margin-top:8px;">
-        <button class="btn" type="button" onclick="reclaimAllOrphaned()">全部认领</button>
-        <span id="reclaimStatus" style="font-size:13px;color:var(--muted);margin-left:8px;"></span>
-    </div>
-</div>
-{% endif %}
-
 <script>
 function saveConfig() {
-    const fields = ['word_count', 'tone', 'structure', 'personal_pronoun', 'sentence_length', 'paragraph_density', 'humor_style', 'ending_style', 'output_form'];
+    const fields = ['word_count', 'tone', 'structure', 'personal_pronoun', 'sentence_length', 'paragraph_density', 'humor_style', 'ending_style'];
     const config = {};
     fields.forEach(f => {
         const el = document.getElementById('cfg_' + f);
@@ -291,45 +258,6 @@ function deleteExample(id) {
             location.reload();
         }
     }).catch(() => showToast('❌ 删除失败'));
-}
-
-function reclaimExample(id) {
-    const status = document.getElementById('reclaimStatus');
-    status.textContent = '⏳ 认领中...';
-    fetch('/api/v1/styles/{{ style.name }}/examples/reclaim', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({example_ids: [id]})
-    }).then(r => r.json()).then(d => {
-        if (d.status === 'ok' && d.reclaimed > 0) {
-            const item = document.querySelector('.orphaned-example-item[data-id="' + id + '"]');
-            if (item) item.remove();
-            status.textContent = '✅ 已认领，刷新页面可见';
-            setTimeout(() => location.reload(), 500);
-        } else {
-            status.textContent = '❌ ' + (d.message || '认领失败');
-        }
-    }).catch(() => status.textContent = '❌ 请求失败');
-}
-
-function reclaimAllOrphaned() {
-    const items = document.querySelectorAll('.orphaned-example-item');
-    const ids = Array.from(items).map(el => parseInt(el.dataset.id));
-    if (ids.length === 0) return;
-    const status = document.getElementById('reclaimStatus');
-    status.textContent = '⏳ 认领 ' + ids.length + ' 条素材...';
-    fetch('/api/v1/styles/{{ style.name }}/examples/reclaim', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({example_ids: ids})
-    }).then(r => r.json()).then(d => {
-        if (d.status === 'ok' && d.reclaimed > 0) {
-            status.textContent = '✅ 成功认领 ' + d.reclaimed + ' 条素材';
-            setTimeout(() => location.reload(), 500);
-        } else {
-            status.textContent = '❌ ' + (d.message || '认领失败');
-        }
-    }).catch(() => status.textContent = '❌ 请求失败');
 }
 
 function toggleExample(btn) {

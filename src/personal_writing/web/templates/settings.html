@@ -22,7 +22,7 @@
         </div>
         <div>
             <label style="font-size:13px;color:#555;display:block;margin-bottom:4px;">作者（可选）</label>
-            <input type="text" id="author" value="{{ creds.author }}" placeholder="卡兹克"
+            <input type="text" id="author" value="{{ creds.author }}" placeholder="流深 Sherry"
                    style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
         </div>
         <div style="display:flex;gap:8px;margin-top:8px;">
@@ -45,7 +45,7 @@
 <div class="card">
     <h2>关于凭证安全</h2>
     <p style="font-size:13px;color:#888;line-height:1.6;">
-        APPID 和 AppSecret 仅保存在本地 <code>~/.openclaw/.env</code> 和 skill 配置文件中，
+        APPID 和 AppSecret 仅保存在本地 <code>.env</code> 和 skill 配置文件中，
         不会上传到任何第三方服务器。仅在发布文章时用于获取微信 API 的 access_token。
     </p>
 </div>

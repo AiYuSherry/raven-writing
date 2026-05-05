@@ -112,22 +112,26 @@ class StyleRegistry:
             if db_row:
                 db_config = json.loads(db_row["config"]) if isinstance(db_row["config"], str) else db_row.get("config", {})
                 config.update(db_config)
+            category = config.get("category") or ("academic" if s.name == "zheng_ge_academic" else "general")
             styles.append({
                 "name": s.name,
                 "display_name": db_row["display_name"] if db_row else s.display_name,
                 "description": db_row["description"] if db_row else s.description,
                 "config": config,
+                "category": category,
                 "is_builtin": True,
             })
         # Also include DB custom styles
         for db_style in StyleRepo.list():
             if db_style["name"] not in self._styles:
                 config = json.loads(db_style["config"]) if isinstance(db_style["config"], str) else db_style.get("config", {})
+                category = config.get("category") or "custom"
                 styles.append({
                     "name": db_style["name"],
                     "display_name": db_style["display_name"],
                     "description": db_style["description"],
                     "config": config,
+                    "category": category,
                     "is_builtin": bool(db_style.get("is_builtin", 0)),
                 })
         return styles

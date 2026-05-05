@@ -3,8 +3,6 @@
 import csv
 import os
 import re
-import zipfile
-from html import unescape
 
 
 URL_PATTERNS = [
@@ -21,58 +19,10 @@ READABLE_EXTENSIONS = {
     '.c', '.h', '.cpp', '.hpp',
     '.xml', '.svg', '.yaml', '.sh', '.bash', '.zsh',
     '.conf', '.env.example', '.gitignore', '.dockerfile',
-    '.csv', '.sql', '.r', '.lua', '.epub',
+    '.csv', '.sql', '.r', '.lua',
 }
 
 SPREADSHEET_EXTENSIONS = {'.xlsx', '.xlsm', '.xls'}
-
-
-def _strip_html_text(html):
-    text = re.sub(r"(?is)<script.*?>.*?</script>", " ", html)
-    text = re.sub(r"(?is)<style.*?>.*?</style>", " ", text)
-    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
-    text = re.sub(r"(?i)</p\s*>", "\n\n", text)
-    text = re.sub(r"(?i)</div\s*>", "\n", text)
-    text = re.sub(r"(?i)</h[1-6]\s*>", "\n\n", text)
-    text = re.sub(r"(?is)<[^>]+>", " ", text)
-    text = unescape(text)
-    text = re.sub(r"[ \t]+\n", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ \t]{2,}", " ", text)
-    return text.strip()
-
-
-def read_epub(path, max_docs=20):
-    """Read EPUB files by extracting text from XHTML/HTML chapters."""
-    path = os.path.expanduser(path)
-    title = os.path.basename(path)
-    parts = [f"# EPUB文件: {title}"]
-    with zipfile.ZipFile(path, "r") as zf:
-        names = [name for name in zf.namelist() if name.lower().endswith((".xhtml", ".html", ".htm"))]
-        chapter_names = [name for name in names if "/text/" in name.lower() or "/chapter" in name.lower() or "/chap" in name.lower()]
-        selected = chapter_names or names
-        used = 0
-        for name in selected:
-            if used >= max_docs:
-                break
-            try:
-                raw = zf.read(name).decode("utf-8", errors="replace")
-            except Exception:
-                try:
-                    raw = zf.read(name).decode("utf-8-sig", errors="replace")
-                except Exception:
-                    continue
-            text = _strip_html_text(raw)
-            if not text or len(text) < 20:
-                continue
-            heading = os.path.splitext(os.path.basename(name))[0]
-            parts.append(f"\n## {heading}\n\n{text[:8000]}")
-            used += 1
-        if used == 0:
-            raise ValueError("没有在 EPUB 里解析到可用正文")
-        if len(selected) > used:
-            parts.append(f"\n> 只提取前 {used} 个正文文件用于预览。")
-    return "\n".join(parts), title
 
 
 def detect_source_type(raw):
@@ -179,8 +129,6 @@ def read_file(path):
     ext = os.path.splitext(path)[1].lower()
     if ext in SPREADSHEET_EXTENSIONS or ext == ".csv":
         return read_spreadsheet(path)
-    if ext == ".epub":
-        return read_epub(path)
     with open(path, 'r', encoding='utf-8', errors='replace') as f:
         content = f.read()
     title = os.path.basename(path)
@@ -217,8 +165,6 @@ def read_directory(dir_path):
             ext = os.path.splitext(fpath)[1].lower()
             if ext in SPREADSHEET_EXTENSIONS or ext == ".csv":
                 content, _ = read_spreadsheet(fpath)
-            elif ext == ".epub":
-                content, _ = read_epub(fpath)
             else:
                 with open(fpath, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()

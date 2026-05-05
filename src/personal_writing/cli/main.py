@@ -5,6 +5,14 @@ import argparse
 from ..core import pipeline
 from ..core.style_engine import registry as style_registry
 from ..db.repository import MaterialRepo, SessionRepo, ArticleRepo
+from ..zotero_library import (
+    build_reference_pack,
+    build_writing_snippet,
+    export_references,
+    import_file,
+    import_pdf_file,
+    search_references,
+)
 
 
 def main():
@@ -46,6 +54,46 @@ def main():
     # init command
     sub.add_parser("init", help="初始化数据库")
 
+    # zotero import/search helpers
+    zotero_import_p = sub.add_parser("zotero-import", help="导入 Zotero/Better BibTeX 导出的文献")
+    zotero_import_p.add_argument("--library-id", type=int, required=True, help="目标素材库 ID")
+    zotero_import_p.add_argument("--file", required=True, help="BibTeX / CSL JSON / RIS 文件路径")
+    zotero_import_p.add_argument("--format", default="", help="bibtex / csl-json / ris；不填自动识别")
+    zotero_import_p.add_argument("--folder-id", default="", help="可选：导入到指定素材库文件夹")
+
+    zotero_pdf_p = sub.add_parser("zotero-import-pdf", help="导入 PDF 为 Zotero-style 文献条目")
+    zotero_pdf_p.add_argument("--library-id", type=int, required=True, help="目标素材库 ID")
+    zotero_pdf_p.add_argument("--file", required=True, help="PDF 文件路径")
+    zotero_pdf_p.add_argument("--folder-id", default="", help="可选：导入到指定素材库文件夹")
+    zotero_pdf_p.add_argument("--title", default="", help="可选：覆盖自动提取的题名")
+    zotero_pdf_p.add_argument("--authors", default="", help="可选：作者，多个作者用分号分隔")
+    zotero_pdf_p.add_argument("--year", default="", help="可选：年份")
+    zotero_pdf_p.add_argument("--journal", default="", help="可选：期刊/出版物")
+    zotero_pdf_p.add_argument("--tags", default="", help="可选：标签，逗号或分号分隔")
+
+    zotero_search_p = sub.add_parser("zotero-search", help="筛选 Zotero-style 文献")
+    zotero_search_p.add_argument("--library-id", type=int, required=True, help="素材库 ID")
+    zotero_search_p.add_argument("--query", "-q", default="", help="关键词")
+    zotero_search_p.add_argument("--author", default="", help="作者")
+    zotero_search_p.add_argument("--year", default="", help="年份")
+    zotero_search_p.add_argument("--tag", default="", help="标签")
+    zotero_search_p.add_argument("--journal", default="", help="期刊/出版物")
+    zotero_search_p.add_argument("--limit", type=int, default=20, help="返回数量")
+
+    zotero_snippet_p = sub.add_parser("zotero-snippet", help="生成可复制引用素材片段")
+    zotero_snippet_p.add_argument("--document-id", type=int, required=True, help="Zotero 文献对应的 document_id")
+    zotero_snippet_p.add_argument("--style", default="chinese", choices=["chinese", "apa"], help="引用格式")
+
+    zotero_pack_p = sub.add_parser("zotero-reference-pack", help="生成 AI 写作参考文献包")
+    zotero_pack_p.add_argument("--library-id", type=int, action="append", required=True, help="素材库 ID，可重复")
+    zotero_pack_p.add_argument("--query", "-q", required=True, help="检索问题")
+    zotero_pack_p.add_argument("--top-k", type=int, default=6, help="文献卡数量")
+    zotero_pack_p.add_argument("--style", default="chinese", choices=["chinese", "apa"], help="引用格式")
+
+    zotero_export_p = sub.add_parser("zotero-export", help="导出 Zotero-style 文献")
+    zotero_export_p.add_argument("--library-id", type=int, required=True, help="素材库 ID")
+    zotero_export_p.add_argument("--format", default="csl-json", choices=["csl-json", "bibtex"], help="导出格式")
+
     args = parser.parse_args()
 
     # Initialize
@@ -69,6 +117,24 @@ def main():
 
     elif args.command == "web":
         cmd_web(args)
+
+    elif args.command == "zotero-import":
+        cmd_zotero_import(args)
+
+    elif args.command == "zotero-import-pdf":
+        cmd_zotero_import_pdf(args)
+
+    elif args.command == "zotero-search":
+        cmd_zotero_search(args)
+
+    elif args.command == "zotero-snippet":
+        cmd_zotero_snippet(args)
+
+    elif args.command == "zotero-reference-pack":
+        cmd_zotero_reference_pack(args)
+
+    elif args.command == "zotero-export":
+        cmd_zotero_export(args)
 
     else:
         parser.print_help()
@@ -218,6 +284,89 @@ def cmd_headline(args):
     result = pipeline.generate_headlines(raw_input, args.style or None)
     print()
     print(result)
+
+
+def cmd_zotero_import(args):
+    """Import a BibTeX/CSL JSON export into a material library."""
+    try:
+        imported = import_file(
+            args.library_id,
+            args.file,
+            fmt=args.format,
+            folder_id=args.folder_id,
+        )
+    except Exception as e:
+        print(f"❌ Zotero 导入失败: {e}")
+        return
+    print(f"✅ 已导入 {len(imported)} 条 Zotero-style 文献")
+    for item in imported[:20]:
+        print(f"  document_id={item['document_id']} · {item.get('year') or 'n.d.'} · {item.get('title')}")
+
+
+def cmd_zotero_import_pdf(args):
+    """Import a PDF as a Zotero-style reference and indexed material."""
+    try:
+        imported = import_pdf_file(
+            args.library_id,
+            args.file,
+            folder_id=args.folder_id,
+            metadata={
+                "title": args.title,
+                "authors": args.authors,
+                "year": args.year,
+                "journal": args.journal,
+                "tags": args.tags,
+            },
+        )
+    except Exception as e:
+        print(f"❌ PDF 文献导入失败: {e}")
+        return
+    print("✅ 已导入 PDF 文献")
+    print(f"  document_id={imported['document_id']} · chunks={imported['chunk_count']}")
+    print(f"  title={imported['title']}")
+    print(f"  file={imported['file_path']}")
+
+
+def cmd_zotero_search(args):
+    """Search imported Zotero-style references."""
+    refs = search_references(
+        args.library_id,
+        query=args.query,
+        author=args.author,
+        year=args.year,
+        tag=args.tag,
+        journal=args.journal,
+        limit=args.limit,
+    )
+    if not refs:
+        print("没有匹配文献")
+        return
+    for ref in refs:
+        authors = "；".join(ref.get("authors") or []) or "佚名"
+        print(f"document_id={ref['document_id']} · {authors} · {ref.get('year') or 'n.d.'}")
+        print(f"  {ref.get('title')}")
+        if ref.get("publicationTitle"):
+            print(f"  {ref.get('publicationTitle')}")
+
+
+def cmd_zotero_snippet(args):
+    """Print a copyable writing-desk citation/material snippet."""
+    snippet = build_writing_snippet(args.document_id, citation_style=args.style)
+    if not snippet:
+        print("未找到 Zotero 文献")
+        return
+    print(snippet)
+
+
+def cmd_zotero_reference_pack(args):
+    """Print an AI-ready reference pack."""
+    pack = build_reference_pack(args.library_id, args.query, top_k=args.top_k, citation_style=args.style)
+    print(pack["pack"])
+
+
+def cmd_zotero_export(args):
+    """Export Zotero-style references from a library."""
+    print(export_references(args.library_id, fmt=args.format))
 
 
 def cmd_web(args):

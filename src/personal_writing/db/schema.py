@@ -3,16 +3,8 @@
 import sqlite3
 import os
 
-def _writing_data_dir():
-    env = os.environ.get("PERSONAL_WRITING_DATA")
-    if env:
-        return env
-    base = os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    return os.path.join(base, "data")
-
-
-DB_DIR = _writing_data_dir()
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+DB_DIR = os.path.join(_PROJECT_ROOT, "data")
 DB_PATH = os.path.join(DB_DIR, "personal_writing.db")
 
 SCHEMA_SQL = """
@@ -45,7 +37,6 @@ CREATE TABLE IF NOT EXISTS articles (
     session_id INTEGER NOT NULL,
     style TEXT NOT NULL,
     title TEXT DEFAULT '',
-    original_title TEXT DEFAULT '',
     content TEXT NOT NULL DEFAULT '',
     original_content TEXT DEFAULT '',
     headline_formula TEXT DEFAULT '',
@@ -109,24 +100,157 @@ CREATE TABLE IF NOT EXISTS common_phrases (
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
-CREATE TABLE IF NOT EXISTS headline_analysis (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    style TEXT DEFAULT '',
-    headline_ids TEXT NOT NULL DEFAULT '[]',
-    headline_count INTEGER NOT NULL DEFAULT 0,
-    summary TEXT NOT NULL DEFAULT '',
-    patterns TEXT NOT NULL DEFAULT '[]',
-    key_takeaways TEXT NOT NULL DEFAULT '[]',
-    tips TEXT NOT NULL DEFAULT '',
-    raw_analysis TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-);
-
 CREATE TABLE IF NOT EXISTS review_analysis (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     analysis TEXT NOT NULL,
     article_count INTEGER DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS material_libraries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    topic TEXT DEFAULT '',
+    discipline TEXT DEFAULT '',
+    citation_style TEXT DEFAULT 'inline_source_id',
+    strict_grounding INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_material_libraries_updated_at
+ON material_libraries(updated_at);
+
+CREATE TABLE IF NOT EXISTS material_library_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_id INTEGER NOT NULL,
+    parent_id INTEGER DEFAULT NULL,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (library_id) REFERENCES material_libraries(id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_id) REFERENCES material_library_folders(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_material_library_folders_library
+ON material_library_folders(library_id, parent_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_material_library_folders_parent
+ON material_library_folders(parent_id);
+
+CREATE TABLE IF NOT EXISTS library_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_id INTEGER NOT NULL,
+    folder_id INTEGER DEFAULT NULL,
+    title TEXT DEFAULT '',
+    original_filename TEXT DEFAULT '',
+    file_path TEXT DEFAULT '',
+    source_type TEXT NOT NULL DEFAULT 'paste',
+    source_url TEXT DEFAULT '',
+    mime_type TEXT DEFAULT '',
+    sha256 TEXT DEFAULT '',
+    author TEXT DEFAULT '',
+    authors TEXT DEFAULT '[]',
+    year TEXT DEFAULT '',
+    publication_title TEXT DEFAULT '',
+    doi TEXT DEFAULT '',
+    abstract TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    attachment_path TEXT DEFAULT '',
+    source TEXT DEFAULT '',
+    zotero_key TEXT DEFAULT '',
+    zotero_item_type TEXT DEFAULT '',
+    published_at TEXT DEFAULT '',
+    page_count INTEGER DEFAULT 0,
+    word_count INTEGER DEFAULT 0,
+    parse_status TEXT NOT NULL DEFAULT 'queued',
+    parse_error TEXT DEFAULT '',
+    text_preview TEXT DEFAULT '',
+    tags TEXT DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (library_id) REFERENCES material_libraries(id) ON DELETE CASCADE,
+    FOREIGN KEY (folder_id) REFERENCES material_library_folders(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_library_documents_library_id
+ON library_documents(library_id);
+CREATE INDEX IF NOT EXISTS idx_library_documents_sha256
+ON library_documents(sha256);
+CREATE INDEX IF NOT EXISTS idx_library_documents_status
+ON library_documents(parse_status);
+
+CREATE TABLE IF NOT EXISTS document_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_id INTEGER NOT NULL,
+    document_id INTEGER NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    section_title TEXT DEFAULT '',
+    page_start INTEGER DEFAULT 0,
+    page_end INTEGER DEFAULT 0,
+    char_start INTEGER DEFAULT 0,
+    char_end INTEGER DEFAULT 0,
+    locator TEXT DEFAULT '',
+    text TEXT NOT NULL,
+    char_count INTEGER DEFAULT 0,
+    token_count INTEGER DEFAULT 0,
+    metadata TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (library_id) REFERENCES material_libraries(id) ON DELETE CASCADE,
+    FOREIGN KEY (document_id) REFERENCES library_documents(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_chunks_library_id
+ON document_chunks(library_id);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_document_id
+ON document_chunks(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_page
+ON document_chunks(page_start, page_end);
+CREATE INDEX IF NOT EXISTS idx_document_chunks_chunk_index
+ON document_chunks(document_id, chunk_index);
+
+CREATE TABLE IF NOT EXISTS generation_retrieval_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    library_ids TEXT NOT NULL DEFAULT '[]',
+    query TEXT NOT NULL DEFAULT '',
+    retrieval_policy TEXT NOT NULL DEFAULT '{}',
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_generation_retrieval_snapshots_session
+ON generation_retrieval_snapshots(session_id);
+
+CREATE TABLE IF NOT EXISTS article_citations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_id INTEGER NOT NULL,
+    snapshot_id INTEGER DEFAULT 0,
+    source_label TEXT NOT NULL,
+    document_id INTEGER NOT NULL,
+    chunk_id INTEGER NOT NULL,
+    quoted_text TEXT DEFAULT '',
+    citation_text TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_article_citations_article
+ON article_citations(article_id);
+"""
+
+FTS_SQL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS document_chunks_fts
+USING fts5(
+    text,
+    section_title,
+    document_id UNINDEXED,
+    library_id UNINDEXED,
+    content='document_chunks',
+    content_rowid='id'
 );
 """
 
@@ -138,16 +262,6 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    # A packaged copy may start with an empty SQLite file if the app is opened
-    # before the normal pipeline initialization path completes. Create the base
-    # schema here too so read-only pages never fail with "no such table".
-    has_styles = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'styles'"
-    ).fetchone()
-    if not has_styles:
-        conn.executescript(SCHEMA_SQL)
-        conn.executescript(HEADLINE_FEEDBACK_TABLE_SQL)
-        conn.commit()
     return conn
 
 
@@ -156,9 +270,47 @@ MIGRATIONS = [
     "ALTER TABLE articles ADD COLUMN headline_candidates TEXT DEFAULT '[]'",
     "ALTER TABLE articles ADD COLUMN headline_selected TEXT DEFAULT ''",
     "ALTER TABLE articles ADD COLUMN previous_content TEXT DEFAULT ''",
-    "ALTER TABLE articles ADD COLUMN original_title TEXT DEFAULT ''",
-    "UPDATE articles SET original_title = title WHERE original_title IS NULL OR original_title = ''",
     "ALTER TABLE sessions ADD COLUMN title TEXT DEFAULT ''",
+    "ALTER TABLE sessions ADD COLUMN library_ids TEXT DEFAULT '[]'",
+    "ALTER TABLE sessions ADD COLUMN retrieval_policy TEXT DEFAULT '{}'",
+    "ALTER TABLE sessions ADD COLUMN retrieval_snapshot_id INTEGER DEFAULT 0",
+    "ALTER TABLE articles ADD COLUMN citation_summary TEXT DEFAULT '{}'",
+    "ALTER TABLE articles ADD COLUMN grounding_status TEXT DEFAULT ''",
+    "ALTER TABLE library_documents ADD COLUMN folder_id INTEGER DEFAULT NULL",
+    "ALTER TABLE library_documents ADD COLUMN tags TEXT DEFAULT '[]'",
+    "ALTER TABLE library_documents ADD COLUMN authors TEXT DEFAULT '[]'",
+    "ALTER TABLE library_documents ADD COLUMN publication_title TEXT DEFAULT ''",
+    "ALTER TABLE library_documents ADD COLUMN doi TEXT DEFAULT ''",
+    "ALTER TABLE library_documents ADD COLUMN abstract TEXT DEFAULT ''",
+    "ALTER TABLE library_documents ADD COLUMN notes TEXT DEFAULT ''",
+    "ALTER TABLE library_documents ADD COLUMN attachment_path TEXT DEFAULT ''",
+    "ALTER TABLE library_documents ADD COLUMN source TEXT DEFAULT ''",
+    "ALTER TABLE library_documents ADD COLUMN zotero_key TEXT DEFAULT ''",
+    "ALTER TABLE library_documents ADD COLUMN zotero_item_type TEXT DEFAULT ''",
+    """CREATE INDEX IF NOT EXISTS idx_library_documents_year
+       ON library_documents(year)""",
+    """CREATE INDEX IF NOT EXISTS idx_library_documents_doi
+       ON library_documents(doi)""",
+    """CREATE INDEX IF NOT EXISTS idx_library_documents_zotero_key
+       ON library_documents(zotero_key)""",
+    """CREATE TABLE IF NOT EXISTS material_library_folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        library_id INTEGER NOT NULL,
+        parent_id INTEGER DEFAULT NULL,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+        FOREIGN KEY (library_id) REFERENCES material_libraries(id) ON DELETE CASCADE,
+        FOREIGN KEY (parent_id) REFERENCES material_library_folders(id) ON DELETE SET NULL
+    )""",
+    """CREATE INDEX IF NOT EXISTS idx_material_library_folders_library
+       ON material_library_folders(library_id, parent_id, sort_order)""",
+    """CREATE INDEX IF NOT EXISTS idx_material_library_folders_parent
+       ON material_library_folders(parent_id)""",
+    """CREATE INDEX IF NOT EXISTS idx_library_documents_folder_id
+       ON library_documents(folder_id)""",
     """CREATE TABLE IF NOT EXISTS headline_library (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         headline TEXT NOT NULL,
@@ -192,6 +344,10 @@ def init_db():
     conn = get_connection()
     conn.executescript(SCHEMA_SQL)
     conn.executescript(HEADLINE_FEEDBACK_TABLE_SQL)
+    try:
+        conn.executescript(FTS_SQL)
+    except sqlite3.OperationalError:
+        pass
 
     # Run migrations (ignore errors if column already exists)
     for migration in MIGRATIONS:
@@ -203,9 +359,10 @@ def init_db():
     # Insert default built-in styles if not exist
     default_styles = [
         ("daily", "日常", "自言自语式的日常随笔，短句自嘲，自由跳跃", '{"word_count": 800, "sentence_length": "short", "tone": "casual", "structure": "free_flow", "paragraph_density": "tight", "rhetoric_density": "low", "personal_pronoun": "first_person", "humor_style": "self_deprecating", "ending_style": "open_ended"}', 1),
-        ("sherry", "卡兹克（公众号长文）", "卡兹克的公众号长文风格，温暖有说服力", '{"word_count": 2000, "sentence_length": "medium", "tone": "warm", "structure": "numbered_sections", "paragraph_density": "normal", "rhetoric_density": "medium", "personal_pronoun": "first_person", "humor_style": "dry", "ending_style": "summary"}', 1),
+        ("sherry", "Sherry", "流深 Sherry 的公众号长文风格，温暖有说服力", '{"word_count": 2000, "sentence_length": "medium", "tone": "warm", "structure": "numbered_sections", "paragraph_density": "normal", "rhetoric_density": "medium", "personal_pronoun": "first_person", "humor_style": "dry", "ending_style": "summary"}', 1),
         ("short_science", "短科普", "客观亲切的短科普，一篇讲清楚一个东西", '{"word_count": 500, "sentence_length": "short_to_medium", "tone": "objective", "structure": "pain_point_to_solution", "paragraph_density": "normal", "rhetoric_density": "low", "personal_pronoun": "mixed", "humor_style": "none", "ending_style": "summary"}', 1),
         ("xiaohongshu", "小红书", "emoji点缀的短笔记，钩子开头+标签结尾", '{"word_count": 600, "sentence_length": "very_short", "tone": "casual", "structure": "hook_to_content", "paragraph_density": "tight", "rhetoric_density": "low", "personal_pronoun": "first_person", "humor_style": "dry", "ending_style": "open_ended"}', 1),
+        ("zheng_ge_academic", "郑戈论文风格", "郑戈学术作者写作模型，适合生成法学选题、摘要、引言、提纲和章节论证", '{"word_count": 5000, "sentence_length": "long", "tone": "academic", "structure": "academic_paper", "paragraph_density": "dense", "rhetoric_density": "low", "personal_pronoun": "none", "humor_style": "none", "ending_style": "theoretical_summary", "category": "academic"}', 1),
     ]
 
     for name, display_name, description, config, is_builtin in default_styles:

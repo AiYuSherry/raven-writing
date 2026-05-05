@@ -13,6 +13,9 @@ setup(
         "flask>=3.0",
         "openpyxl>=3.1",
         "xlrd>=2.0",
+        "pypdf>=4.0",
+        "python-docx>=1.1",
+        "beautifulsoup4>=4.12",
     ],
     entry_points={
         "console_scripts": [

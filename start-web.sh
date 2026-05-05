@@ -3,11 +3,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-PORT=5555
+PORT=5566
 URL="http://127.0.0.1:$PORT"
+PYTHON_BIN="${PYTHON_BIN:-.venv/bin/python}"
+
+if [ ! -x "$PYTHON_BIN" ]; then
+    PYTHON_BIN="python3"
+fi
 
 echo "🚀 正在启动乌鸦写作台..."
-env PYTHONPATH=src python3 -m personal_writing web --port "$PORT" &
+env PYTHONPATH=src "$PYTHON_BIN" -m personal_writing web --port "$PORT" &
 PID=$!
 
 # 等待服务就绪

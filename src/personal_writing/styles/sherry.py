@@ -15,8 +15,8 @@ from ..core.style_engine import BaseStyle, registry
 
 SKILL_PATHS = [
     os.path.expanduser("~/.codex/skills/sherry/SKILL.md"),
-    os.path.expanduser("~/.claude/skills/Sherry/SKILL.md"),
-    os.path.expanduser("~/.claude/skills/sherry/SKILL.md"),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "skills", "sherry", "SKILL.md"),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "skills", "sherry", "SKILL.md"),
 ]
 
 
@@ -38,8 +38,8 @@ def _load_skill_prompt():
 
 class SherryStyle(BaseStyle):
     name = "sherry"
-    display_name = "卡兹克（公众号长文）"
-    description = "卡兹克的公众号长文风格，温暖有说服力"
+    display_name = "Sherry（公众号长文）"
+    description = "流深 Sherry 的公众号长文风格，温暖有说服力"
     _skill_prompt = None
     config = {
         "word_count": 2000,

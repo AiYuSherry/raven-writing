@@ -38,113 +38,28 @@
 {% endif %}
 <div class="card">
     <h2>标题积累</h2>
-    <div style="margin-bottom:14px;">
-        <div style="font-size:13px;color:var(--muted);margin-bottom:6px;">单个添加</div>
-        <div style="display:flex;gap:8px;align-items:center;">
-            <input id="headlineInput" type="text" placeholder="粘贴一个标题..." style="flex:1;padding:10px 12px;border:1.2px solid var(--line);border-radius:7px;font-size:15px;background:var(--control);color:var(--ink);box-sizing:border-box;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();addManualHeadline();}">
-            <select id="headlineStyle" style="padding:10px 12px;border:1.2px solid var(--line);border-radius:7px;background:var(--control);color:var(--ink);width:140px;flex-shrink:0;">
-                <option value="">通用</option>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) 160px auto;gap:8px;align-items:center;margin-bottom:12px;">
+        <input id="headlineInput" type="text" placeholder="粘贴你看到的好标题..." style="padding:10px 12px;border:1.2px solid var(--line);border-radius:7px;font-size:15px;background:var(--control);color:var(--ink);">
+        <select id="headlineStyle" style="padding:10px 12px;border:1.2px solid var(--line);border-radius:7px;background:var(--control);color:var(--ink);">
+            <option value="">通用</option>
         {% for s in styles %}
             <option value="{{ s.name }}" {% if s.name == selected_style %}selected{% endif %}>{{ s.display_name }}</option>
         {% endfor %}
-            </select>
-            <button class="btn" type="button" onclick="addManualHeadline()" style="flex-shrink:0;">添加</button>
-        </div>
-    </div>
-    <div style="padding-top:14px;border-top:1.2px solid var(--line);">
-        <div style="font-size:13px;color:var(--muted);margin-bottom:6px;">批量添加 · 一行一个标题</div>
-        <div style="display:flex;gap:8px;align-items:center;">
-            <textarea id="batchHeadlineInput" rows="3" placeholder="每行粘贴一个标题&#10;示例：&#10;泡泡玛特迷倒段永平&#10;我在香港吃了一周菠萝包" style="flex:1;font-size:14px;min-height:70px;padding:8px 12px;border:1.2px solid var(--line);border-radius:7px;background:var(--control);color:var(--ink);box-sizing:border-box;resize:vertical;"></textarea>
-            <select id="batchHeadlineStyle" style="padding:10px 12px;border:1.2px solid var(--line);border-radius:7px;background:var(--control);color:var(--ink);width:140px;flex-shrink:0;">
-                <option value="">通用</option>
-        {% for s in styles %}
-            <option value="{{ s.name }}">{{ s.display_name }}</option>
-        {% endfor %}
-            </select>
-            <button class="btn" type="button" onclick="batchAddHeadlines()" style="flex-shrink:0;">批量添加</button>
-        </div>
-        <div id="batchStatus" style="font-size:13px;color:var(--muted);margin-top:4px;"></div>
+        </select>
+        <button class="btn" type="button" onclick="addManualHeadline()">添加</button>
     </div>
     <div id="headlineLibrary" style="display:flex;flex-direction:column;gap:8px;">
-        <div id="libraryToolbar" style="display:flex;align-items:center;gap:8px;padding-bottom:4px;">
-            <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--muted);cursor:pointer;">
-                <input type="checkbox" id="selectAll" onchange="toggleSelectAll()" style="accent-color:var(--accent);"> 全选
-            </label>
-            <button class="btn btn-secondary" style="padding:4px 12px;font-size:13px;display:none;" type="button" id="batchDeleteBtn" onclick="batchDeleteHeadlines()">批量删除</button>
-            <span id="selectedCount" style="font-size:12px;color:var(--muted);display:none;"></span>
-        </div>
     {% for h in headline_library %}
         <div class="headline-library-item" data-id="{{ h.id }}" style="display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 12px;border:1.2px solid var(--line);border-radius:7px;background:var(--surface-soft);">
-            <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
-                <input type="checkbox" class="hl-checkbox" value="{{ h.id }}" onchange="updateBatchDeleteBtn()" style="accent-color:var(--accent);">
+            <div style="min-width:0;">
+                <div style="font-size:15px;font-weight:600;">{{ h.headline }}</div>
+                <div style="font-size:12px;color:var(--muted);">{{ h.style or '通用' }}{% if h.note %} · {{ h.note }}{% endif %}</div>
             </div>
-            <div style="min-width:0;flex:1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                <div class="hl-title" style="font-size:15px;font-weight:600;cursor:pointer;" onclick="editHeadline({{ h.id }})" title="点击编辑">{{ h.headline }}</div>
-                <span class="hl-style-tag" style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--accent-soft);color:var(--accent);font-weight:500;cursor:pointer;flex-shrink:0;" onclick="editHeadline({{ h.id }})" title="点击修改类别">{{ h.style or '通用' }}</span>
-                {% if h.note %}<span style="font-size:12px;color:var(--muted);flex-shrink:0;">{{ h.note }}</span>{% endif %}
-                {% if h.source %}
-                <span style="font-size:11px;color:var(--muted);opacity:0.7;flex-shrink:0;">{{ h.source }}</span>
-                {% endif %}
-                <div class="hl-edit-form" style="display:none;width:100%;flex-direction:column;gap:6px;">
-                    <input class="hl-edit-text" type="text" style="padding:4px 8px;border:1.2px solid var(--line);border-radius:6px;font-size:14px;width:100%;background:var(--control);color:var(--ink);box-sizing:border-box;">
-                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-                        <select class="hl-edit-style" style="padding:4px 8px;border:1.2px solid var(--line);border-radius:6px;font-size:12px;background:var(--control);color:var(--ink);">
-                            <option value="">通用</option>
-                    {% for s in styles %}
-                        <option value="{{ s.name }}">{{ s.display_name }}</option>
-                    {% endfor %}
-                        </select>
-                        <input class="hl-edit-note" type="text" placeholder="备注" style="padding:4px 8px;border:1.2px solid var(--line);border-radius:6px;font-size:12px;width:140px;background:var(--control);color:var(--ink);">
-                        <button class="btn btn-secondary" style="padding:3px 10px;font-size:11px;" type="button" onclick="saveHeadlineEdit({{ h.id }})">保存</button>
-                        <button class="btn btn-secondary" style="padding:3px 10px;font-size:11px;" type="button" onclick="cancelHeadlineEdit({{ h.id }})">取消</button>
-                    </div>
-                </div>
-            </div>
-            <div style="display:flex;gap:4px;flex-shrink:0;">
-                <button class="btn btn-secondary" style="padding:4px 8px;font-size:15px;" type="button" onclick="deleteHeadline({{ h.id }})">删除</button>
-            </div>
+            <button class="btn btn-secondary" type="button" onclick="deleteHeadline({{ h.id }})">删除</button>
         </div>
     {% else %}
         <div id="emptyLibrary" style="color:var(--muted);font-size:14px;">还没有积累标题。看到喜欢的标题可以直接粘贴进来。</div>
     {% endfor %}
-    </div>
-</div>
-
-<div class="card">
-    <h2>标题分析</h2>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-        <select id="analysisStyle" style="padding:10px 12px;border:1.2px solid var(--line);border-radius:7px;background:var(--control);color:var(--ink);flex:1;min-width:140px;">
-            <option value="">全部标题</option>
-        {% for s in styles %}
-            <option value="{{ s.name }}">{{ s.display_name }}</option>
-        {% endfor %}
-        </select>
-        <button class="btn" type="button" onclick="triggerAnalysis()" id="analyzeBtn">AI 分析</button>
-    </div>
-    <div id="analysisResult" style="display:none;"></div>
-    <div id="analysisHistory">
-        {% if analyses_history %}
-        <div style="font-size:13px;color:var(--muted);margin-bottom:8px;">分析记录</div>
-        {% for a in analyses_history %}
-        <div class="analysis-history-item" data-id="{{ a.id }}" style="padding:12px 14px;border:1.2px solid var(--line);border-radius:7px;margin-bottom:8px;background:var(--surface-soft);cursor:pointer;" onclick="showAnalysis({{ a.id }})">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-                <div style="min-width:0;flex:1;">
-                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px;">
-                        <strong>{{ a.style or '全部标题' }}</strong>
-                        <span style="font-size:12px;color:var(--muted);">{{ a.headline_count }} 条</span>
-                        <span style="font-size:11px;color:var(--muted);">{{ a.created_at }}</span>
-                    </div>
-                    {% if a.summary %}
-                    <div style="font-size:13px;color:var(--ink-soft);line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">{{ a.summary }}</div>
-                    {% endif %}
-                </div>
-                <div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px;">
-                    <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" type="button" onclick="event.stopPropagation();deleteAnalysis({{ a.id }})">删除</button>
-                </div>
-            </div>
-        </div>
-        {% endfor %}
-        {% endif %}
     </div>
 </div>
 <script>
@@ -164,47 +79,6 @@ function toast(text) {
     t.textContent = text;
     document.body.appendChild(t);
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 1800);
-}
-
-// ─── 批量删除 ───
-
-function toggleSelectAll() {
-    const checked = document.getElementById('selectAll').checked;
-    document.querySelectorAll('.hl-checkbox').forEach(cb => cb.checked = checked);
-    updateBatchDeleteBtn();
-}
-
-function updateBatchDeleteBtn() {
-    const checked = document.querySelectorAll('.hl-checkbox:checked');
-    const btn = document.getElementById('batchDeleteBtn');
-    const count = document.getElementById('selectedCount');
-    if (checked.length > 0) {
-        btn.style.display = 'inline-block';
-        count.style.display = 'inline';
-        count.textContent = '已选 ' + checked.length + ' 项';
-    } else {
-        btn.style.display = 'none';
-        count.style.display = 'none';
-    }
-}
-
-function batchDeleteHeadlines() {
-    const checked = document.querySelectorAll('.hl-checkbox:checked');
-    const ids = Array.from(checked).map(cb => parseInt(cb.value));
-    if (ids.length === 0) return;
-    if (!confirm('删除选中的 ' + ids.length + ' 个标题？')) return;
-    fetch('/api/v1/headlines/library/batch-delete', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ids})
-    }).then(r => r.json()).then(d => {
-        if (d.status === 'ok') {
-            toast('已删除 ' + d.deleted + ' 个标题');
-            setTimeout(() => location.reload(), 300);
-        } else {
-            alert(d.message || '删除失败');
-        }
-    }).catch(e => alert('网络错误: ' + e.message));
 }
 
 function saveHeadline(headline, formula) {
@@ -242,189 +116,6 @@ function deleteHeadline(id) {
             if (d.status !== 'ok') throw new Error(d.message || '删除失败');
             const item = document.querySelector('.headline-library-item[data-id="' + id + '"]');
             if (item) item.remove();
-        }).catch(e => alert(e.message));
-}
-
-function editHeadline(id) {
-    const item = document.querySelector('.headline-library-item[data-id="' + id + '"]');
-    if (!item) return;
-    const title = item.querySelector('.hl-title');
-    const tag = item.querySelector('.hl-style-tag');
-    const form = item.querySelector('.hl-edit-form');
-    const textInput = form.querySelector('.hl-edit-text');
-    const styleSelect = form.querySelector('.hl-edit-style');
-    const noteInput = form.querySelector('.hl-edit-note');
-    // Pre-fill with current values
-    textInput.value = title ? title.textContent.trim() : '';
-    const currentStyle = tag ? tag.textContent.trim() : '';
-    if (currentStyle && currentStyle !== '通用') styleSelect.value = currentStyle;
-    else styleSelect.value = '';
-    noteInput.value = '';
-    form.style.display = 'flex';
-    textInput.focus();
-}
-
-function saveHeadlineEdit(id) {
-    const item = document.querySelector('.headline-library-item[data-id="' + id + '"]');
-    if (!item) return;
-    const form = item.querySelector('.hl-edit-form');
-    const headline = form.querySelector('.hl-edit-text').value.trim();
-    if (!headline) { alert('标题不能为空'); return; }
-    const style = form.querySelector('.hl-edit-style').value;
-    const note = form.querySelector('.hl-edit-note').value.trim();
-    fetch('/api/v1/headlines/library/' + id, {
-        method: 'PATCH',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({headline, style, note})
-    }).then(r => r.json()).then(d => {
-        if (d.status === 'ok') {
-            location.reload();
-        } else {
-            alert(d.message || '保存失败');
-        }
-    }).catch(e => alert('保存失败'));
-}
-
-function cancelHeadlineEdit(id) {
-    const item = document.querySelector('.headline-library-item[data-id="' + id + '"]');
-    if (!item) return;
-    const form = item.querySelector('.hl-edit-form');
-    form.style.display = 'none';
-}
-
-// ─── 批量添加标题 ───
-
-function batchAddHeadlines() {
-    const input = document.getElementById('batchHeadlineInput');
-    const text = input.value.trim();
-    if (!text) return alert('先粘贴一些标题，每行一个');
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l);
-    if (lines.length === 0) return alert('没有有效的标题');
-    const style = document.getElementById('batchHeadlineStyle').value;
-    const status = document.getElementById('batchStatus');
-    status.textContent = '⏳ 正在添加 ' + lines.length + ' 个标题...';
-
-    let added = 0;
-    let errors = [];
-    const promises = lines.map(headline =>
-        fetch('/api/v1/headlines/library', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({headline, style, source: '批量添加'})
-        }).then(r => r.json()).then(d => {
-            if (d.status === 'ok') added++;
-            else errors.push(headline.slice(0, 20));
-        }).catch(() => errors.push(headline.slice(0, 20)))
-    );
-
-    Promise.all(promises).then(() => {
-        input.value = '';
-        status.textContent = '✅ 成功添加 ' + added + ' 个标题' + (errors.length ? '，' + errors.length + ' 个失败' : '');
-        setTimeout(() => location.reload(), 800);
-    });
-}
-
-// ─── 标题分析 ───
-
-function triggerAnalysis() {
-    const btn = document.getElementById('analyzeBtn');
-    const style = document.getElementById('analysisStyle').value;
-    btn.disabled = true;
-    btn.textContent = '分析中...';
-    document.getElementById('analysisResult').style.display = 'none';
-
-    fetch('/api/v1/headlines/analyze', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({style, limit: 20})
-    }).then(r => r.json()).then(d => {
-        btn.disabled = false;
-        btn.textContent = 'AI 分析';
-        if (d.status !== 'ok') {
-            alert(d.message || '分析失败');
-            return;
-        }
-        renderAnalysis(d.analysis);
-        location.reload(); // reload to show new history entry
-    }).catch(e => {
-        btn.disabled = false;
-        btn.textContent = 'AI 分析';
-        alert('网络错误: ' + e.message);
-    });
-}
-
-function renderAnalysis(a) {
-    const el = document.getElementById('analysisResult');
-    el.style.display = 'block';
-
-    let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
-    html += '<span style="font-size:13px;color:var(--muted);">基于 ' + a.headline_count + ' 条标题的分析</span>';
-    html += '<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" type="button" onclick="this.parentElement.parentElement.style.display=\'none\'">收起</button>';
-    html += '</div>';
-
-    if (a.saved_formulas && a.saved_formulas.length > 0) {
-        html += '<div style="padding:10px 14px;background:#e8f5e9;border:1.2px solid #c8e6c9;border-radius:7px;margin-bottom:10px;font-size:13px;color:#2e7d32;">';
-        html += '已自动保存 ' + a.saved_formulas.length + ' 个新模式到标题公式库：';
-        html += a.saved_formulas.map(function(f) { return '「' + f + '」'; }).join('、');
-        html += '，下次生成标题时可用。</div>';
-    }
-
-    if (a.summary) {
-        html += '<div style="padding:12px 14px;background:var(--surface-solid);border:1.2px solid var(--line);border-radius:7px;margin-bottom:10px;font-size:15px;line-height:1.7;">';
-        html += '<strong style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px;">总体概括</strong>';
-        html += a.summary;
-        html += '</div>';
-    }
-
-    if (a.patterns && a.patterns.length > 0) {
-        html += '<div style="padding:12px 14px;background:var(--surface-solid);border:1.2px solid var(--line);border-radius:7px;margin-bottom:10px;">';
-        html += '<strong style="font-size:13px;color:var(--muted);display:block;margin-bottom:6px;">核心模式</strong>';
-        html += '<div style="display:flex;flex-direction:column;gap:6px;">';
-        for (const p of a.patterns) {
-            html += '<div style="font-size:14px;line-height:1.6;">' + p + '</div>';
-        }
-        html += '</div></div>';
-    }
-
-    if (a.tips) {
-        html += '<div style="padding:12px 14px;background:var(--surface-solid);border:1.2px solid var(--line);border-radius:7px;margin-bottom:6px;">';
-        html += '<strong style="font-size:13px;color:var(--muted);display:block;margin-bottom:4px;">写作技巧与建议</strong>';
-        html += '<div style="font-size:14px;line-height:1.7;white-space:pre-wrap;">' + a.tips + '</div>';
-        html += '</div>';
-    }
-
-    if (a.raw_analysis) {
-        html += '<div style="margin-top:4px;">';
-        html += '<details style="font-size:13px;"><summary style="color:var(--muted);cursor:pointer;">查看完整分析原文</summary>';
-        html += '<div style="padding:12px;margin-top:6px;background:var(--surface-soft);border-radius:6px;font-size:13px;line-height:1.7;white-space:pre-wrap;">' + a.raw_analysis + '</div>';
-        html += '</details></div>';
-    }
-
-    el.innerHTML = html;
-}
-
-function showAnalysis(id) {
-    fetch('/api/v1/headlines/analysis')
-        .then(r => r.json()).then(d => {
-            if (d.status !== 'ok') return;
-            const a = d.analyses.find(x => x.id === id);
-            if (a) {
-                // parse JSON fields
-                if (typeof a.patterns === 'string') a.patterns = JSON.parse(a.patterns || '[]');
-                renderAnalysis(a);
-                window.scrollTo({top: document.getElementById('analysisResult').offsetTop - 100, behavior: 'smooth'});
-            }
-        }).catch(() => {});
-}
-
-function deleteAnalysis(id) {
-    if (!confirm('删除这条分析记录？')) return;
-    fetch('/api/v1/headlines/analysis/' + id, {method: 'DELETE'})
-        .then(r => r.json()).then(d => {
-            if (d.status === 'ok') {
-                const item = document.querySelector('.analysis-history-item[data-id="' + id + '"]');
-                if (item) item.remove();
-            }
         }).catch(e => alert(e.message));
 }
 </script>

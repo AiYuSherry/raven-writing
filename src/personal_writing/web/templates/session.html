@@ -8,7 +8,7 @@
 </div>
 {% for article in articles %}
 <div class="card">
-    <div class="meta" style="margin-bottom:10px;"><span class="tag" style="font-size:14px;font-weight:600;padding:4px 14px;background:#f0f0f0;border-radius:6px;">{{ article.display_name or article.style }}</span></div>
+    <div class="meta"><span class="tag">{{ article.style }}</span></div>
     <div class="headline-selector" id="hs-{{ article.id }}">
         <div style="font-size:13px;color:#666;margin-bottom:6px;">🏷️ 选择标题（点击选中，或自定义）</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;">
@@ -27,17 +27,12 @@
     <div class="article-box" id="sbox-{{ article.id }}" contenteditable="true" oninput="updateWordCount('sbox-{{ article.id }}')">{{ article.content|strip_md }}</div>
     <div class="word-count" id="wc-sbox-{{ article.id }}" style="font-size:12px;color:#999;margin-top:4px;text-align:right;">{{ article.content|word_count }} 字</div>
     <div id="feedback-{{ article.id }}" style="margin-top: 8px;"></div>
-    <div id="rw-result-{{ article.id }}" class="rewrite-result" style="display:none;"></div>
     <div class="rewrite-box" id="rw-{{ article.id }}">
         <textarea class="rewrite-input" rows="2" placeholder="输入修改要求，回车提交，Shift+回车换行..."
-                  oncompositionstart="this.dataset.composing='1'"
-                  oncompositionend="this.dataset.composing='0'"
-                  onkeydown="if(shouldSubmitRewrite(event,this)){event.preventDefault();rewriteArticle({{ article.id }},'sbox-{{ article.id }}')}"></textarea>
-        <div class="rewrite-hint" id="rw-hint-{{ article.id }}" style="font-size:12px;color:#777;margin-top:6px;">
-            默认基于上方正文修改；如果出现“修改版”，再次点修改会基于那一版继续改。
-        </div>
+                  onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();rewriteArticle({{ article.id }},'sbox-{{ article.id }}')}"></textarea>
         <div class="rewrite-submit"><button class="btn" style="font-size:13px;padding:6px 20px;" onclick="rewriteArticle({{ article.id }},'sbox-{{ article.id }}')">✏️ 修改</button></div>
     </div>
+    <div id="rw-result-{{ article.id }}" class="rewrite-result" style="display:none;"></div>
     <div class="article-tools">
         <div class="tool-group">
             <span class="tool-label">复制</span>
@@ -108,17 +103,12 @@
 <script>
 function copyMarkdown(id, boxId) {
     const el = document.getElementById(boxId);
-    copyClip(getEditableContent(el), '✅ Markdown 已复制');
+    copyClip(el.textContent || el.innerText, '✅ Markdown 已复制');
 }
 
 function copyPlain(boxId) {
     const el = document.getElementById(boxId);
-    copyClip(getEditableContent(el), '✅ 纯文本已复制');
-}
-
-function getEditableContent(el) {
-    if (!el) return '';
-    return (el.innerText || el.textContent || '').replace(/\u00a0/g, ' ').trim();
+    copyClip(el.textContent || el.innerText, '✅ 纯文本已复制');
 }
 
 function copyClip(text, msg) {
@@ -131,7 +121,7 @@ function saveEdit(articleId, boxId) {
     fetch('/api/v1/article/' + articleId + '/save', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content: getEditableContent(el), headline: getCurrentHeadline(articleId)})
+        body: JSON.stringify({content: el.textContent || el.innerText})
     }).then(r => r.json()).then(d => {
         showToast(d.status === 'ok' ? '✅ 已保存' : '❌ ' + (d.message || '保存失败'));
     }).catch(() => showToast('❌ 保存请求失败'));
@@ -163,7 +153,7 @@ function reviewChanges(articleId, boxId) {
     fetch('/api/v1/article/' + articleId + '/review', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content: getEditableContent(el)})
+        body: JSON.stringify({content: el.textContent || el.innerText})
     }).then(r => r.json()).then(d => {
         if (d.review) fb.innerHTML = '<div style="background:#f8f8ff;border:1px solid #ddd;border-radius:6px;padding:12px;font-size:13px;white-space:pre-wrap;"><div style="font-weight:600;margin-bottom:8px;">🔍 AI 修改建议</div>' + d.review + '</div>';
         else fb.innerHTML = '<div style="color:#888;padding:8px;">' + (d.review || '无需审阅') + '</div>';
@@ -175,8 +165,6 @@ function selectHeadline(articleId, el) {
     // Clicking already-active pill → deselect
     if (el.classList.contains('active')) {
         el.classList.remove('active');
-        const container = document.getElementById('hs-' + articleId);
-        if (container) container.dataset.selectedHeadline = '';
         badge.textContent = '';
         badge.style.display = 'none';
         fetch('/api/v1/article/' + articleId + '/select-headline', {
@@ -191,7 +179,6 @@ function selectHeadline(articleId, el) {
     el.classList.add('active');
     const headline = el.dataset.hl;
     const formula = el.dataset.formula;
-    container.dataset.selectedHeadline = headline;
     document.getElementById('hl-input-' + articleId).value = '';
     badge.textContent = '✅ 已选: ' + headline;
     badge.style.display = 'inline-block';
@@ -207,7 +194,6 @@ function selectCustomHeadline(articleId) {
     if (!headline) return;
     const container = document.getElementById('hs-' + articleId);
     container.querySelectorAll('.hl-pill').forEach(p => p.classList.remove('active'));
-    container.dataset.selectedHeadline = headline;
     const badge = document.getElementById('hl-badge-' + articleId);
     badge.textContent = '✏️ 自定义: ' + headline;
     badge.style.display = 'inline-block';
@@ -218,49 +204,17 @@ function selectCustomHeadline(articleId) {
     });
 }
 
-function getCurrentHeadline(articleId) {
-    const container = document.getElementById('hs-' + articleId);
-    const input = document.getElementById('hl-input-' + articleId);
-    return ((input && input.value.trim()) || (container && container.dataset.selectedHeadline) || '').trim();
-}
-
-function shouldSubmitRewrite(event, textarea) {
-    if (!event || event.key !== 'Enter' || event.shiftKey) return false;
-    if (event.isComposing || event.keyCode === 229) return false;
-    if (textarea && textarea.dataset.composing === '1') return false;
-    return true;
-}
-
-function renderRewriteSummary(items) {
-    if (!items || !items.length) {
-        return '<div style="font-size:12px;color:#999;">这次有改动，但摘要没抓到具体句子，你可以直接看下面正文。</div>';
-    }
-    return '<ul style="margin:6px 0 0 18px;padding:0;color:#666;font-size:12px;line-height:1.6;">'
-        + items.map(item => '<li>' + escHtml(item) + '</li>').join('')
-        + '</ul>';
-}
-
 function rewriteArticle(articleId, boxId) {
     const el = document.getElementById(boxId);
     const rw = document.getElementById('rw-' + articleId);
     const input = rw.querySelector('.rewrite-input');
-    const button = rw.querySelector('.rewrite-submit button');
-    const hint = document.getElementById('rw-hint-' + articleId);
     const instruction = input.value.trim();
     if (!instruction) { showToast('❓ 输入修改要求'); return; }
-    if (rw.dataset.busy === '1') { showToast('⏳ 正在修改中'); return; }
-    rw.dataset.busy = '1';
     input.disabled = true;
     input.placeholder = '⏳ 修改中...';
-    if (button) {
-        button.disabled = true;
-        button.textContent = '正在修改……';
-        button.style.opacity = '0.7';
-        button.style.cursor = 'wait';
-    }
     const resultBox = document.getElementById('rw-result-' + articleId);
-    const prevContent = resultBox.style.display !== 'none' ? (resultBox._lastResult || '') : '';
-    const content = prevContent || getEditableContent(el);
+    const prevContent = resultBox._lastResult || '';
+    const content = prevContent || el.textContent || el.innerText;
     fetch('/api/v1/article/' + articleId + '/rewrite', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -269,83 +223,43 @@ function rewriteArticle(articleId, boxId) {
         if (data.status === 'ok') {
             resultBox.style.display = 'block';
             resultBox._lastResult = data.content;
-            resultBox.dataset.boxId = boxId;
             resultBox.innerHTML =
                 '<div style="font-size:13px;color:#888;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">' +
-                '<span>📝 修改版（再次点“修改”会基于这一版继续改，不会回到原文）</span>' +
+                '<span>📝 修改版（⬆ 上方是原文 / 上一版修改结果）</span>' +
                 '<span style="display:flex;gap:6px;">' +
-                '<button class="btn-secondary" type="button" style="font-size:12px;padding:3px 10px;" onclick="acceptRewrite(' + articleId + ')">✅ 采纳</button>' +
+                '<button class="btn-secondary" style="font-size:12px;padding:3px 10px;" onclick="acceptRewrite(' + articleId + ", '" + boxId + "')" + '">✅ 采纳</button>' +
                 '<button class="btn-secondary" style="font-size:12px;padding:3px 10px;" onclick="dismissRewrite(' + articleId + ')">✕ 关闭</button>' +
                 '</span></div>' +
-                '<div style="background:#f8f8f8;border:1px solid #eee;border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12px;color:#444;">' +
-                '<div style="font-weight:600;margin-bottom:4px;">你的修改要求</div>' +
-                '<div style="white-space:pre-wrap;">' + escHtml(data.instruction || instruction) + '</div>' +
-                '</div>' +
-                '<div style="background:#fbfbfb;border:1px solid #eee;border-radius:8px;padding:10px 12px;margin:8px 0 12px;font-size:12px;">' +
-                '<div style="font-weight:600;margin-bottom:4px;color:#444;">系统识别到的改动</div>' +
-                renderRewriteSummary(data.change_summary || []) +
-                '</div>' +
                 '<div class="article-box" id="rw-content-' + articleId + '" contenteditable="true" style="font-size:13px;">' + escHtml(stripMd(data.content)) + '</div>';
             showToast('✅ 修改完成，可继续输入要求再次修改');
             input.value = '';
-            input.placeholder = '继续输入修改要求；将基于上面的修改版继续改';
-            if (hint) {
-                hint.textContent = '现在会基于上方“修改版”继续修改；点“采纳”后，这一版才会替换正文。';
-            }
         } else {
             showToast('❌ ' + (data.message || '修改失败'));
         }
     }).catch(() => showToast('❌ 修改请求失败'))
-    .finally(() => {
-        rw.dataset.busy = '0';
-        input.disabled = false;
-        if (!resultBox._lastResult) {
-            input.placeholder = '输入修改要求，回车提交，Shift+回车换行...';
-        }
-        if (button) {
-            button.disabled = false;
-            button.textContent = '✏️ 修改';
-            button.style.opacity = '';
-            button.style.cursor = '';
-        }
-    });
+    .finally(() => { input.disabled = false; input.placeholder = '输入修改要求，回车提交，Shift+回车换行...'; });
 }
 function acceptRewrite(articleId, boxId) {
     const resultBox = document.getElementById('rw-result-' + articleId);
-    boxId = boxId || resultBox.dataset.boxId;
     const contentBox = document.getElementById('rw-content-' + articleId);
-    if (!boxId || !contentBox) { showToast('❌ 没有可采纳的修改版'); return; }
-    const newContent = getEditableContent(contentBox);
+    const newContent = contentBox.textContent || contentBox.innerText;
     if (looksLikeEditReport(newContent)) {
         showToast('❌ 这段是修改说明，不是正文，已阻止采纳');
         return;
     }
     document.getElementById(boxId).textContent = newContent;
     resultBox._lastResult = '';
-    resultBox.dataset.boxId = '';
     resultBox.style.display = 'none';
-    resultBox.innerHTML = '';
-    const input = document.querySelector('#rw-' + articleId + ' .rewrite-input');
-    const hint = document.getElementById('rw-hint-' + articleId);
-    if (input) input.placeholder = '输入修改要求，回车提交，Shift+回车换行...';
-    if (hint) hint.textContent = '默认基于上方正文修改；如果出现“修改版”，再次点修改会基于那一版继续改。';
     fetch('/api/v1/article/' + articleId + '/save', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content: newContent, headline: getCurrentHeadline(articleId)})
+        body: JSON.stringify({content: newContent})
     });
+    resultBox.style.display = 'none';
     showToast('✅ 已采纳');
 }
 function dismissRewrite(articleId) {
-    const resultBox = document.getElementById('rw-result-' + articleId);
-    resultBox._lastResult = '';
-    resultBox.dataset.boxId = '';
-    resultBox.style.display = 'none';
-    resultBox.innerHTML = '';
-    const input = document.querySelector('#rw-' + articleId + ' .rewrite-input');
-    const hint = document.getElementById('rw-hint-' + articleId);
-    if (input) input.placeholder = '输入修改要求，回车提交，Shift+回车换行...';
-    if (hint) hint.textContent = '默认基于上方正文修改；如果出现“修改版”，再次点修改会基于那一版继续改。';
+    document.getElementById('rw-result-' + articleId).style.display = 'none';
 }
 function escHtml(text) {
     return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -371,12 +285,12 @@ const _articleDirs = {};
 
 function typesetArticle(articleId, boxId) {
     const el = document.getElementById(boxId);
-    const content = getEditableContent(el);
+    const content = el.textContent || el.innerText;
     showToast('⏳ 正在生成主题画廊...');
     fetch('/api/v1/article/' + articleId + '/typeset', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content: content, headline: getCurrentHeadline(articleId)})
+        body: JSON.stringify({content: content})
     }).then(r => r.json()).then(data => {
         if (data.status === 'ok' && data.html) {
             _articleDirs[articleId] = data.article_dir || '';
@@ -392,14 +306,14 @@ function typesetArticle(articleId, boxId) {
 
 function publishWechat(articleId, boxId) {
     const el = document.getElementById(boxId);
-    const content = getEditableContent(el);
+    const content = el.textContent || el.innerText;
     const theme = document.getElementById('theme-' + articleId).value;
     if (!confirm('确定推送到公众号草稿箱吗？（主题: ' + theme + '）')) return;
     showToast('⏳ 正在排版并推送...');
     fetch('/api/v1/article/' + articleId + '/publish', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content: content, theme: theme, headline: getCurrentHeadline(articleId)})
+        body: JSON.stringify({content: content, theme: theme})
     }).then(r => r.json()).then(data => {
         if (data.status === 'ok') {
             showToast('✅ 已推送到公众号草稿箱');
@@ -414,14 +328,14 @@ function archiveObsidian(articleId, boxId) {
     fetch('/api/v1/article/' + articleId + '/archive', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content: getEditableContent(el), headline: getCurrentHeadline(articleId)})
+        body: JSON.stringify({content: el.textContent || el.innerText})
     }).then(r => r.json()).then(d => showToast(d.status === 'ok' ? '✅ 已存档' : '❌ ' + d.message));
 }
 
 function updateWordCount(boxId) {
     const el = document.getElementById(boxId);
     if (!el) return;
-    const text = getEditableContent(el);
+    const text = el.textContent || el.innerText || '';
     const cjk = (text.match(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
     const latin = (text.match(/[A-Za-z]+(?:[-'][A-Za-z]+)*/g) || []).length;
     const nums = (text.match(/\d+(?:[.,]\d+)*/g) || []).length;
