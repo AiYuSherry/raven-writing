@@ -959,10 +959,11 @@ def generate_headline_candidates(content, article_text, style_name=None):
 
 要求：
 1. 至少生成 5 个标题
-2. 每个标题要标注使用了哪个公式（或标注"自由创作"）
+2. 每个标题标注使用了哪个公式（或标注"自由创作"）
 3. 标题要符合文章内容，不要跑题
-4. 不要创建任何文件，不要保存到磁盘
-5. {title_tone}
+4. **硬性约束：每个标题必须在 20 字以内（超出则无效，会被自动丢弃）**
+5. 不要创建任何文件，不要保存到磁盘
+6. {title_tone}
 
 请严格按以下格式输出（不要额外解释）：
 ## 标题候选
@@ -1001,7 +1002,13 @@ def generate_headline_candidates(content, article_text, style_name=None):
             if m:
                 candidates.append({"headline": m.group(1).strip(), "formula": ""})
 
-    return candidates[:8]  # Max 8
+    # Hard filter: enforce 20-character limit
+    before = len(candidates)
+    candidates = [c for c in candidates if len(c["headline"]) <= 20]
+    if candidates and before != len(candidates):
+        pass  # silently drop over-length titles
+
+    return candidates[:10]  # Max 10
 
 
 def generate_headlines(content, style_name=None):

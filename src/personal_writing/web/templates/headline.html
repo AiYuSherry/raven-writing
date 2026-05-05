@@ -6,16 +6,20 @@
         <h2>素材</h2>
         <textarea name="content" placeholder="粘贴素材内容...">{{ content or '' }}</textarea>
     </div>
-    <div class="card">
+    <div class="card" style="padding-bottom:20px;margin-bottom:0;">
         <h2>风格筛选（可选）</h2>
+        <div style="margin-top:8px;">
         <select name="style" style="padding:8px;border:1px solid #ddd;border-radius:6px;">
             <option value="">全部风格</option>
         {% for s in styles %}
             <option value="{{ s.name }}" {% if s.name == selected_style %}selected{% endif %}>{{ s.display_name }}</option>
         {% endfor %}
         </select>
+        </div>
     </div>
-    <button type="submit" class="btn">生成标题</button>
+    <div style="margin:18px 0;">
+        <button type="submit" class="btn">生成标题</button>
+    </div>
 </form>
 {% if result %}
 <div class="card">
@@ -33,6 +37,20 @@
             </div>
         </div>
     {% endfor %}
+    </div>
+    <div style="margin-top:16px;padding-top:16px;border-top:1.2px solid var(--line);">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:8px;">自己撰写</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <input id="customHeadlineInput" type="text" placeholder="输入你自拟的标题..." style="flex:1;padding:10px 12px;border:1.2px solid var(--line);border-radius:7px;font-size:15px;background:var(--control);color:var(--ink);box-sizing:border-box;" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomHeadline();}">
+            <select id="customHeadlineStyle" style="padding:10px 12px;border:1.2px solid var(--line);border-radius:7px;background:var(--control);color:var(--ink);width:120px;flex-shrink:0;">
+                <option value="">通用</option>
+        {% for s in styles %}
+            <option value="{{ s.name }}">{{ s.display_name }}</option>
+        {% endfor %}
+            </select>
+            <button class="btn" type="button" onclick="addCustomHeadline()" style="flex-shrink:0;">添加</button>
+        </div>
+        <div id="customHeadlineStatus" style="font-size:13px;color:var(--muted);margin-top:4px;"></div>
     </div>
 </div>
 {% endif %}
@@ -147,6 +165,31 @@
         {% endif %}
     </div>
 </div>
+
+{% if generation_history %}
+<div class="card">
+    <h2>生成记录</h2>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+    {% for g in generation_history %}
+        <div style="padding:14px 16px;border:1.2px solid var(--line);border-radius:7px;background:var(--surface-soft);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span style="font-size:12px;color:var(--muted);">{{ g.created_at }}</span>
+                {% if g.style %}<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--accent-soft);color:var(--accent);">{{ g.style }}</span>{% endif %}
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+            {% for item in g._items %}
+                <div style="font-size:14px;padding:4px 8px;background:var(--surface-solid);border-radius:4px;">
+                    {{ item.headline }}
+                    <span style="font-size:11px;color:var(--muted);margin-left:6px;">{{ item.formula or '自由创作' }}</span>
+                </div>
+            {% endfor %}
+            </div>
+        </div>
+    {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 <script>
 function copyHeadline(text) {
     navigator.clipboard.writeText(text).then(() => {
@@ -290,6 +333,27 @@ function cancelHeadlineEdit(id) {
     if (!item) return;
     const form = item.querySelector('.hl-edit-form');
     form.style.display = 'none';
+}
+
+// ─── 自己撰写标题 ───
+
+function addCustomHeadline() {
+    const input = document.getElementById('customHeadlineInput');
+    const headline = input.value.trim();
+    if (!headline) { alert('请输入标题'); return; }
+    if (headline.length > 20) { alert('标题不能超过 20 个字'); return; }
+    const style = document.getElementById('customHeadlineStyle').value;
+    fetch('/api/v1/headlines/library', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({headline, style, note: '自己撰写', source: '自己撰写'})
+    }).then(r => r.json()).then(d => {
+        if (d.status !== 'ok') throw new Error(d.message || '添加失败');
+        input.value = '';
+        const status = document.getElementById('customHeadlineStatus');
+        status.textContent = '✅ 已添加到标题积累: ' + headline;
+        setTimeout(() => { status.textContent = ''; }, 2000);
+    }).catch(e => alert(e.message));
 }
 
 // ─── 批量添加标题 ───

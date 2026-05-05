@@ -7,6 +7,7 @@ import subprocess
 import base64
 import re
 import uuid
+import hashlib
 import difflib
 from flask import Flask, render_template, request, jsonify
 
@@ -15,7 +16,7 @@ from ..core.input_reader import read_spreadsheet, read_epub
 from ..core.pipeline import _clean_output, _format_rules_for_style, _strip_daily_headings, _repair_hard_constraint_violations, _hard_enforce_output, _violates_hard_constraints, looks_like_edit_report, DAILY_FINAL_GUARDRAILS, STRICT_OUTPUT_RULES, HARD_CONSTRAINT_REPAIR_RULES, _sanitize_style_prompt_template
 from ..core.style_engine import registry as style_registry
 from ..core.obsidian_bridge import archive_to_works
-from ..db.repository import MaterialRepo, SessionRepo, ArticleRepo, HeadlineFeedbackRepo, HeadlineLibraryRepo, HeadlineAnalysisRepo, HeadlineFormulaRepo, CommonPhraseRepo, StyleRepo, StyleExampleRepo, StatsRepo, ReviewAnalysisRepo
+from ..db.repository import MaterialRepo, SessionRepo, ArticleRepo, HeadlineFeedbackRepo, HeadlineLibraryRepo, HeadlineAnalysisRepo, HeadlineFormulaRepo, CommonPhraseRepo, StyleRepo, StyleExampleRepo, StatsRepo, ReviewAnalysisRepo, HeadlineGenerationRepo
 from ..db.schema import get_connection
 from ..utils.text_stats import count_text_units
 from ..utils import claude_client
@@ -482,11 +483,27 @@ def create_app():
             if content.strip():
                 try:
                     result = pipeline.generate_headlines(content, selected_style or None)
+                    # Save to generation history
+                    content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
+                    content_preview = content.strip()[:100].replace("\n", " ")
+                    result_json = json.dumps([{"headline": h, "formula": f} for h, f in result], ensure_ascii=False)
+                    HeadlineGenerationRepo.create(content_hash, content_preview, selected_style, result_json)
                 except Exception as e:
                     result = f"出错: {e}"
         headline_library = HeadlineLibraryRepo.list(selected_style or "", limit=30)
         analyses_history = HeadlineAnalysisRepo.list(limit=10)
-        return render_template("headline.html", styles=styles, content=content, selected_style=selected_style, result=result, headline_library=headline_library, analyses_history=analyses_history)
+        # Load generation history for current content
+        generation_history = []
+        if content.strip():
+            content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
+            raw_history = HeadlineGenerationRepo.list_by_content_hash(content_hash, limit=5)
+            for g in raw_history:
+                try:
+                    g["_items"] = json.loads(g.get("result", "[]"))
+                except Exception:
+                    g["_items"] = []
+                generation_history.append(g)
+        return render_template("headline.html", styles=styles, content=content, selected_style=selected_style, result=result, headline_library=headline_library, analyses_history=analyses_history, generation_history=generation_history)
 
     @app.route("/settings")
     def settings_page():

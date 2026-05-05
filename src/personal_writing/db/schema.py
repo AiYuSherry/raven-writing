@@ -128,6 +128,15 @@ CREATE TABLE IF NOT EXISTS review_analysis (
     article_count INTEGER DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+CREATE TABLE IF NOT EXISTS headline_generation_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_hash TEXT NOT NULL,
+    content_preview TEXT NOT NULL DEFAULT '',
+    style TEXT DEFAULT '',
+    result TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
 """
 
 

@@ -613,3 +613,47 @@ class HeadlineAnalysisRepo:
         conn.execute("DELETE FROM headline_analysis WHERE id = ?", (analysis_id,))
         conn.commit()
         conn.close()
+
+
+class HeadlineGenerationRepo:
+    """CRUD for headline_generation_history table."""
+
+    @staticmethod
+    def create(content_hash, content_preview, style, result_json):
+        conn = get_connection()
+        cur = conn.execute(
+            "INSERT INTO headline_generation_history (content_hash, content_preview, style, result) VALUES (?, ?, ?, ?)",
+            (content_hash, content_preview, style, result_json),
+        )
+        gen_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+        return gen_id
+
+    @staticmethod
+    def list_by_content_hash(content_hash, limit=5):
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT * FROM headline_generation_history WHERE content_hash = ? ORDER BY created_at DESC LIMIT ?",
+            (content_hash, limit),
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def list_recent(limit=10):
+        """List recent distinct generations (grouped by content_hash)."""
+        conn = get_connection()
+        rows = conn.execute(
+            """SELECT h.* FROM headline_generation_history h
+               INNER JOIN (
+                   SELECT content_hash, MAX(created_at) AS max_ct
+                   FROM headline_generation_history
+                   GROUP BY content_hash
+               ) g ON h.content_hash = g.content_hash AND h.created_at = g.max_ct
+               ORDER BY h.created_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
