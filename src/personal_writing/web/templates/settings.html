@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>⚙️ 设置</h1>
+
+<div class="card">
+    <h2>微信公众号凭证</h2>
+    <p style="color:#888;font-size:13px;margin-bottom:16px;">
+        配置 APPID 和 AppSecret 后才能使用「发布到公众号」功能。
+        在 <a href="https://mp.weixin.qq.com" target="_blank" style="color:#07c160;">公众号后台 → 开发 → 基本配置</a> 查看。
+    </p>
+    <div style="display:flex;flex-direction:column;gap:12px;max-width:500px;">
+        <div>
+            <label style="font-size:13px;color:#555;display:block;margin-bottom:4px;">APPID</label>
+            <input type="text" id="app_id" value="{{ creds.app_id }}" placeholder="wx..."
+                   style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+        </div>
+        <div>
+            <label style="font-size:13px;color:#555;display:block;margin-bottom:4px;">AppSecret</label>
+            <input type="password" id="app_secret" value="{{ creds.app_secret }}" placeholder="..."
+                   style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+            <button id="toggleSecret" class="btn btn-secondary" style="font-size:12px;padding:2px 8px;margin-top:4px;" onclick="toggleSecret()">显示</button>
+        </div>
+        <div>
+            <label style="font-size:13px;color:#555;display:block;margin-bottom:4px;">作者（可选）</label>
+            <input type="text" id="author" value="{{ creds.author }}" placeholder="卡兹克"
+                   style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+            <button class="btn btn-primary" onclick="saveWechatCreds()" style="padding:8px 24px;">保存并验证</button>
+            <span id="cred-status" style="font-size:13px;align-self:center;"></span>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>IP 白名单</h2>
+    <p style="font-size:13px;color:#888;line-height:1.6;">
+        微信 API 要求将服务器 IP 添加到公众号后台的白名单中。
+        去 <a href="https://mp.weixin.qq.com" target="_blank" style="color:#07c160;">公众号后台 → 开发 → 基本配置 → IP白名单</a> 添加以下 IP：
+    </p>
+    <div style="background:#f5f5f5;padding:12px 16px;border-radius:6px;font-family:monospace;font-size:16px;margin:8px 0;" id="server-ip">加载中...</div>
+    <p style="font-size:12px;color:#aaa;">如果 IP 变动，重新查一下加上新的即可。</p>
+</div>
+
+<div class="card">
+    <h2>关于凭证安全</h2>
+    <p style="font-size:13px;color:#888;line-height:1.6;">
+        APPID 和 AppSecret 仅保存在本地 <code>~/.openclaw/.env</code> 和 skill 配置文件中，
+        不会上传到任何第三方服务器。仅在发布文章时用于获取微信 API 的 access_token。
+    </p>
+</div>
+
+<script>
+// Fetch server public IP
+fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => {
+    document.getElementById('server-ip').textContent = d.ip;
+}).catch(() => {
+    document.getElementById('server-ip').textContent = '无法获取，终端运行 curl -s api.ipify.org';
+});
+function toggleSecret() {
+    const input = document.getElementById('app_secret');
+    const btn = document.getElementById('toggleSecret');
+    if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = '隐藏';
+    } else {
+        input.type = 'password';
+        btn.textContent = '显示';
+    }
+}
+
+function saveWechatCreds() {
+    const app_id = document.getElementById('app_id').value.trim();
+    const app_secret = document.getElementById('app_secret').value.trim();
+    const author = document.getElementById('author').value.trim();
+    const status = document.getElementById('cred-status');
+
+    if (!app_id || !app_secret) {
+        status.textContent = '❌ APPID 和 AppSecret 不能为空';
+        status.style.color = '#c00';
+        return;
+    }
+
+    status.textContent = '⏳ 保存并验证中...';
+    status.style.color = '#888';
+
+    fetch('/api/v1/settings/wechat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({app_id: app_id, app_secret: app_secret, author: author})
+    })
+    .then(r => r.json())
+    .then(data => {
+        status.textContent = data.message;
+        status.style.color = data.warning ? '#e67e22' : '#07c160';
+    })
+    .catch(err => {
+        status.textContent = '❌ 请求失败: ' + err;
+        status.style.color = '#c00';
+    });
+}
+</script>
+{% endblock %}

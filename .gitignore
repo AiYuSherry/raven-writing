@@ -1,0 +1,31 @@
+# Personal data and materials
+data/
+data.db
+草稿/
+config/
+技能与工具/
+Output/
+.claude/
+output.md
+investment*.xlsx
+
+# Optional local prompt experiments
+prompts/*-local.md
+prompts/*.private.md
+
+# Personal documentation
+写作prompt优化.md
+风格提取-日常.md
+优化后的日常写作prompt.md
+河图歌词集介绍.md
+梦里和crush游武汉.md
+小红书_乌鸦写字台.md
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# OS files
+.DS_Store

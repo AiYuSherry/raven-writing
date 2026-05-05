@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>历史</h1>
+
+<!-- 搜索 -->
+<div class="card" style="padding:12px 16px;">
+    <form method="GET" action="/history" style="display:flex;gap:8px;">
+        <input type="text" name="q" placeholder="搜索素材内容或标题..." value="{{ query or '' }}"
+               style="flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;outline:none;">
+        <button type="submit" class="btn" style="padding:8px 20px;">搜索</button>
+        {% if query %}
+        <a href="/history" class="btn btn-secondary" style="padding:8px 16px;text-decoration:none;">清除</a>
+        {% endif %}
+    </form>
+</div>
+
+{% if not materials %}
+<div class="empty">{{ '未找到匹配的结果' if query else '暂无记录，去写作台写一篇吧' }}</div>
+{% else %}
+<div class="card" style="padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-soft);">
+        <input type="checkbox" id="selectAllMaterials" onchange="toggleAllMaterials(this.checked)">
+        <span>全选当前列表</span>
+        <span id="selectedCount" style="color:var(--muted);">已选 0 条</span>
+    </label>
+    <button class="btn btn-secondary" id="bulkDeleteBtn" type="button" onclick="bulkDeleteMaterials()" disabled
+            style="color:#c00;border-color:#ecc;">批量删除</button>
+</div>
+{% for m in materials %}
+<div class="card" id="mat-{{ m.id }}">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <label style="padding-top:2px;margin-right:10px;">
+            <input type="checkbox" class="material-check" value="{{ m.id }}" onchange="updateSelectionState()">
+        </label>
+        <div style="flex:1;">
+            <div style="font-size:16px;font-weight:600;margin-bottom:2px;">{{ m._display_title or '(无标题)' }}</div>
+            <div class="meta">#{{ m.id }} · {{ m.source_type }} · {{ m.created_at }}</div>
+        </div>
+        <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px;color:#c00;border-color:#ecc;flex-shrink:0;margin-left:8px;" onclick="deleteMaterial({{ m.id }})">删除</button>
+    </div>
+    <div style="margin:8px 0;font-size:13px;color:#555;line-height:1.6;background:#fafafa;padding:10px;border-radius:6px;">
+        {{ m.raw_content[:300] }}{% if m.raw_content|length > 300 %}...{% endif %}
+    </div>
+    {% for s in sessions_by_material.get(m.id, []) %}
+    <div style="margin-top:8px;padding:10px 12px;background:#f8f8f8;border-radius:6px;border-left:3px solid #333;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:13px;font-weight:500;">批次 #{{ s.id }}</span>
+            <span style="font-size:12px;color:#888;">{{ s.created_at }}</span>
+        </div>
+        <div style="font-size:12px;color:#888;margin-bottom:6px;">风格: {{ s.style_names }}</div>
+        {% for article in articles_by_session.get(s.id, []) %}
+        <div style="padding:8px 10px;background:#fff;border-radius:4px;margin-top:4px;border:1px solid #eee;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <span class="tag">{{ article.style }}</span>
+                    <span style="font-size:13px;margin-left:4px;">{{ article.title or article.headline_selected or '(无标题)' }}</span>
+                </div>
+                <a href="/session/{{ s.id }}" class="btn btn-secondary" style="font-size:12px;padding:3px 10px;text-decoration:none;">查看</a>
+            </div>
+            <div style="font-size:13px;color:#444;margin-top:4px;line-height:1.6;max-height:60px;overflow:hidden;">
+                {{ article.content[:200]|strip_md }}{% if article.content|length > 200 %}...{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+{% endfor %}
+{% endif %}
+
+<script>
+function deleteMaterial(id) {
+    if (!confirm('确定删除这条素材及其所有文章？')) return;
+    fetch('/api/v1/material/' + id, {method: 'DELETE'})
+    .then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            const el = document.getElementById('mat-' + id);
+            if (el) el.style.display = 'none';
+            showToast('✅ 已删除');
+        } else {
+            showToast('❌ 删除失败');
+        }
+    }).catch(() => showToast('❌ 请求失败'));
+}
+
+function selectedMaterialIds() {
+    return Array.from(document.querySelectorAll('.material-check:checked')).map(cb => cb.value);
+}
+
+function updateSelectionState() {
+    const selected = selectedMaterialIds();
+    const total = document.querySelectorAll('.material-check').length;
+    const selectAll = document.getElementById('selectAllMaterials');
+    const count = document.getElementById('selectedCount');
+    const bulkBtn = document.getElementById('bulkDeleteBtn');
+    if (count) count.textContent = '已选 ' + selected.length + ' 条';
+    if (bulkBtn) bulkBtn.disabled = selected.length === 0;
+    if (selectAll) {
+        selectAll.checked = total > 0 && selected.length === total;
+        selectAll.indeterminate = selected.length > 0 && selected.length < total;
+    }
+}
+
+function toggleAllMaterials(checked) {
+    document.querySelectorAll('.material-check').forEach(cb => {
+        cb.checked = checked;
+    });
+    updateSelectionState();
+}
+
+function bulkDeleteMaterials() {
+    const ids = selectedMaterialIds();
+    if (!ids.length) return;
+    if (!confirm('确定批量删除选中的 ' + ids.length + ' 条历史吗？对应素材、生成批次和文章都会一起删除。')) return;
+    fetch('/api/v1/materials/bulk-delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ids})
+    }).then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            ids.forEach(id => {
+                const el = document.getElementById('mat-' + id);
+                if (el) el.remove();
+            });
+            updateSelectionState();
+            showToast('✅ 已删除 ' + d.deleted + ' 条');
+            if (!document.querySelector('.material-check')) {
+                location.reload();
+            }
+        } else {
+            showToast('❌ 批量删除失败');
+        }
+    }).catch(() => showToast('❌ 请求失败'));
+}
+
+function showToast(msg) {
+    let t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 24px;border-radius:8px;font-size:14px;z-index:9999;';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 2000);
+}
+</script>
+{% endblock %}

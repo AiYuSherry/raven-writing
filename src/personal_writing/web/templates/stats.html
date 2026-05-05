@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>写作统计</h1>
+
+<!-- 总览 -->
+<div class="card" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;text-align:center;">
+    <div>
+        <div style="font-size:28px;font-weight:700;color:#2563eb;">{{ totals.materials }}</div>
+        <div style="font-size:13px;color:#888;">素材</div>
+    </div>
+    <div>
+        <div style="font-size:28px;font-weight:700;color:#7c3aed;">{{ totals.sessions }}</div>
+        <div style="font-size:13px;color:#888;">生成批次</div>
+    </div>
+    <div>
+        <div style="font-size:28px;font-weight:700;color:#059669;">{{ totals.articles }}</div>
+        <div style="font-size:13px;color:#888;">文章</div>
+    </div>
+    <div>
+        <div style="font-size:28px;font-weight:700;color:#d97706;">{{ totals.total_words or 0 }}</div>
+        <div style="font-size:13px;color:#888;">总字数</div>
+        <div style="font-size:11px;color:#aaa;margin-top:2px;">不含标点/空格</div>
+    </div>
+</div>
+
+<!-- 按风格分布 -->
+<div class="card">
+    <h2>按风格分布</h2>
+    {% if by_style %}
+    {% set max_count = by_style[0].count %}
+    {% set style_colors = ['#2563eb', '#7c3aed', '#059669', '#d97706', '#dc2626', '#0891b2', '#db2777', '#65a30d'] %}
+    <div style="display:flex;flex-direction:column;gap:12px;">
+    {% for item in by_style %}
+        {% set pct = (item.count / max_count * 100)|round %}
+        {% set color = style_colors[loop.index0 % style_colors|length] %}
+        <div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+                <span>{{ item.style or '(未知)' }}</span>
+                <span style="color:#888;">{{ item.count }} 篇</span>
+            </div>
+            <div style="background:#eee;border-radius:6px;height:24px;overflow:hidden;">
+                <div style="background:{{ color }};border-radius:6px;height:100%;width:{{ pct }}%;transition:width 0.5s;display:flex;align-items:center;padding-left:8px;">
+                    <span style="color:#fff;font-size:12px;font-weight:500;">{{ item.count }}</span>
+                </div>
+            </div>
+        </div>
+    {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">暂无数据</div>
+    {% endif %}
+</div>
+
+<!-- 日度趋势 -->
+<div class="card">
+    <h2>日度趋势</h2>
+    {% if by_day %}
+    {% set max_day = (by_day | map(attribute='count') | max) %}
+    <div style="display:flex;align-items:end;gap:6px;height:160px;padding:0 4px;">
+    {% for d in by_day %}
+        {% set h = (d.count / max_day * 140)|round %}
+        {% set depth = (d.count / max_day * 0.7)|round(2) %}
+        {% set r = (37 + depth * 180)|round|int %}
+        {% set g = (99 + depth * 100)|round|int %}
+        {% set b = (235 - depth * 135)|round|int %}
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;height:160px;justify-content:end;">
+            <div style="background:rgb({{ r }},{{ g }},{{ b }});width:100%;border-radius:4px 4px 0 0;height:{{ h }}px;min-height:4px;transition:height 0.5s;"></div>
+            <div style="font-size:11px;color:#888;margin-top:4px;white-space:nowrap;">{{ d.day[5:] }}</div>
+            <div style="font-size:10px;color:#aaa;">{{ d.count }}</div>
+        </div>
+    {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">暂无数据</div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>乌鸦写作台</title>
+    <script>
+    const savedTheme = localStorage.getItem('writingDeskTheme') || 'beige';
+    document.documentElement.dataset.theme = savedTheme;
+    </script>
+    <style>
+        :root {
+            --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            --font-reading: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            --font-mono: "SF Mono", Menlo, Monaco, Consolas, monospace;
+            --ink: #171412;
+            --ink-soft: #4e4740;
+            --muted: #897d70;
+            --paper: #fbfaf7;
+            --paper-deep: #f1eee8;
+            --surface: rgba(255,255,255,0.94);
+            --surface-solid: #fffdf9;
+            --surface-soft: #f7f3ec;
+            --control: #fff;
+            --control-disabled: #f5f1ea;
+            --line: #cfc4b6;
+            --accent: #8d1f1f;
+            --accent-soft: #f3e4df;
+            --sidebar-bg: #fffdf9;
+            --sidebar-hover: #f3eee6;
+            --sidebar-current: #171412;
+            --sidebar-current-text: #fff;
+            --button-bg: #171412;
+            --button-text: #fff;
+            --button-hover: #2d2925;
+            --danger-bg: #ffe0e0;
+            --danger-text: #c00;
+            --success-bg: #fafffa;
+            --success-line: #d0e8d0;
+            --shadow: 0 10px 26px rgba(47, 36, 26, 0.11);
+        }
+        html[data-theme="white"] {
+            --ink: #111;
+            --ink-soft: #4a4a4a;
+            --muted: #777;
+            --paper: #f7f7f7;
+            --paper-deep: #ededed;
+            --surface: rgba(255,255,255,0.96);
+            --surface-solid: #fff;
+            --surface-soft: #f3f3f3;
+            --control: #fff;
+            --control-disabled: #f3f3f3;
+            --line: #c9c9c9;
+            --accent: #111;
+            --accent-soft: #efefef;
+            --sidebar-bg: #fbfbfb;
+            --sidebar-hover: #ededed;
+            --sidebar-current: #111;
+            --sidebar-current-text: #fff;
+            --button-bg: #111;
+            --button-text: #fff;
+            --button-hover: #333;
+            --shadow: 0 10px 26px rgba(0, 0, 0, 0.10);
+        }
+        html[data-theme="black"] {
+            --ink: #f3f0ea;
+            --ink-soft: #c9c2b8;
+            --muted: #9c948a;
+            --paper: #12110f;
+            --paper-deep: #090908;
+            --surface: rgba(24,23,21,0.96);
+            --surface-solid: #181715;
+            --surface-soft: #22201d;
+            --control: #10100f;
+            --control-disabled: #1d1c1a;
+            --line: #36322d;
+            --accent: #d2b48c;
+            --accent-soft: #2b251d;
+            --sidebar-bg: #0f0e0d;
+            --sidebar-hover: #201e1b;
+            --sidebar-current: #f3f0ea;
+            --sidebar-current-text: #111;
+            --button-bg: #f3f0ea;
+            --button-text: #111;
+            --button-hover: #d8d1c6;
+            --danger-bg: #341d1d;
+            --danger-text: #ffb4b4;
+            --success-bg: #172617;
+            --success-line: #2b542b;
+            --shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: var(--font-ui);
+               background: linear-gradient(135deg, var(--paper) 0%, var(--paper-deep) 100%);
+               color: var(--ink); line-height: 1.65; font-size: 16px; font-weight: 400; transition: background 0.18s, color 0.18s;
+               -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+        .layout { display: flex; min-height: 100vh; }
+        .sidebar { width: 264px; background: var(--sidebar-bg); border-right: 1px solid var(--line);
+                   display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow: hidden; flex-shrink: 0; }
+        .sidebar-header { padding: 18px 16px 14px; }
+        .brand-mark { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .brand-icon-wrap { width: 54px; height: 42px; flex-shrink: 0; display: flex; align-items: center; }
+        .brand-icon { width: 100%; height: 100%; display: block; object-fit: contain; }
+        html[data-theme="black"] .brand-icon { filter: invert(1) brightness(1.08); opacity: 0.92; }
+        .sidebar-header .brand { font-family: var(--font-display); font-weight: 760; font-size: 26px; color: var(--ink); display: block; letter-spacing: 0; line-height: 1.12; white-space: nowrap; }
+        .brand-subtitle { color: var(--muted); font-size: 12px; margin: 2px 0 14px 62px; line-height: 1.45; font-weight: 400; }
+        .sidebar-new { display: flex; align-items: center; justify-content: center; gap: 8px; text-align: center; font-size: 15px; font-weight: 650; padding: 9px 12px; text-decoration: none; border-radius: 8px; }
+        .theme-switcher { position: fixed; top: 16px; right: 18px; z-index: 80; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); backdrop-filter: blur(12px); }
+        .theme-option { border: 0; border-radius: 8px; padding: 6px 10px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 500; cursor: pointer; }
+        .theme-option:hover { color: var(--ink); background: var(--sidebar-hover); }
+        .theme-option.active { background: var(--surface-solid); color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+        html[data-theme="black"] .theme-option.active { background: #2a2824; box-shadow: none; }
+        .sidebar-nav { padding: 6px 12px 12px; display: flex; flex-direction: column; gap: 2px; border-bottom: 1px solid var(--line); }
+        .nav-section-title { color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: 0; padding: 10px 10px 4px; }
+        .sidebar-nav a, .sidebar-footer a { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 7px 10px; border-radius: 8px; color: var(--ink-soft); text-decoration: none; font-size: 15px; font-weight: 450; transition: background 0.15s, color 0.15s; }
+        .sidebar-nav a:hover { background: var(--sidebar-hover); color: var(--ink); }
+        .sidebar-nav a.current { background: var(--sidebar-current); color: var(--sidebar-current-text); font-weight: 650; }
+        .nav-icon { width: 18px; height: 18px; flex-shrink: 0; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
+        .sidebar-sessions { flex: 1; min-height: 0; padding: 12px; overflow-y: auto; }
+        .sidebar-sessions .title { font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: 0; margin-bottom: 8px; padding: 0 10px; }
+.sidebar-sessions .title-row { display: flex; align-items: center; justify-content: space-between; padding: 0 10px; margin-bottom: 8px; }
+.sidebar-sessions .title-row .title { margin-bottom: 0; padding: 0; }
+.sidebar-sessions .toggle-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 4px; opacity: 0.6; transition: opacity 0.15s; line-height: 1; }
+.sidebar-sessions .toggle-btn:hover { opacity: 1; background: var(--sidebar-hover); }
+        .session-item { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: start; padding: 9px 8px 9px 10px; border-radius: 8px; margin-bottom: 2px; transition: background 0.15s, color 0.15s; }
+        .session-item:hover { background: var(--sidebar-hover); }
+        .session-link { min-width: 0; color: var(--ink-soft); text-decoration: none; font-size: 13px; font-weight: 400; }
+        .session-link:hover { color: var(--ink); }
+        .session-title { font-weight: 650; color: var(--ink-soft); line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+        .session-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
+        .session-item:hover .session-actions { opacity: 1; }
+        .session-action { width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1; }
+        .session-action:hover { background: var(--surface-solid); color: var(--ink); }
+        .session-action.danger:hover { color: var(--danger-text); }
+        .sidebar-sessions .sess-preview { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sidebar-sessions .sess-style { font-size: 11px; color: var(--muted); opacity: 0.78; }
+        .sidebar-footer { flex-shrink: 0; padding: 10px 12px 14px; border-top: 1px solid var(--line); }
+        .sidebar-footer a:hover { background: var(--sidebar-hover); color: var(--ink); }
+        .sidebar-footer a.current { background: var(--sidebar-current); color: var(--sidebar-current-text); font-weight: 650; }
+        .main { flex: 1; min-width: 0; padding: 36px 32px; max-width: 1040px; margin: 0 auto; width: 100%; }
+        .sidebar-toggle { display: none; position: fixed; bottom: 20px; left: 20px; z-index: 100;
+                          width: 48px; height: 48px; border-radius: 50%; background: var(--button-bg); color: var(--button-text);
+                          border: none; font-size: 20px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+
+        .card { background: var(--surface); border: 1.2px solid var(--line); border-radius: 8px; padding: 28px; margin-bottom: 18px;
+                box-shadow: var(--shadow); }
+        h1 { font-family: var(--font-display); font-size: 34px; line-height: 1.25; margin-bottom: 22px; letter-spacing: 0; font-weight: 720; }
+        h2 { font-family: var(--font-display); font-size: 23px; line-height: 1.35; margin-bottom: 16px; font-weight: 680; }
+        textarea { width: 100%; min-height: 220px; padding: 16px; border: 1.2px solid var(--line);
+                   border-radius: 8px; font-size: 17px; font-family: var(--font-reading); line-height: 1.75; color: var(--ink); background: var(--control);
+                   resize: vertical; font-weight: 400; }
+        textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+        input, select, button { font-family: var(--font-ui); }
+        input, select { background: var(--control) !important; color: var(--ink); border-color: var(--line) !important; }
+        input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.82; font-weight: 400; }
+        input[type="text"] { font-family: var(--font-ui) !important; font-size: 14px; line-height: 1.5; }
+        input[id*="path"], input[id*="Path"] { font-family: var(--font-mono) !important; font-size: 13px; }
+        [style*="border:1px solid #ddd"],
+        [style*="border: 1px solid #ddd"],
+        [style*="border:1px solid #eee"],
+        [style*="border: 1px solid #eee"] { border-color: var(--line) !important; }
+        [style*="background:#f8f8f8"],
+        [style*="background: #f8f8f8"],
+        [style*="background:#f8f8ff"],
+        [style*="background: #f8f8ff"] { background: var(--surface-soft) !important; }
+        .btn { display: inline-block; padding: 11px 24px; background: var(--button-bg); color: var(--button-text);
+               border: none; border-radius: 8px; font-size: 16px; font-weight: 650; cursor: pointer; }
+        .btn:hover { background: var(--button-hover); }
+        .btn-secondary { background: var(--control); color: var(--ink); border: 1.2px solid var(--line); font-size: 15px; padding: 7px 14px; }
+        .btn-secondary:hover { background: var(--surface-soft); }
+        .style-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                      gap: 10px; margin-bottom: 16px; }
+        .style-card { padding: 16px; border: 2px solid var(--line); border-radius: 8px; background: var(--control);
+                      cursor: pointer; text-align: center; user-select: none; }
+        .style-card:hover { border-color: var(--muted); }
+        .style-card.selected { border-color: var(--accent); background: var(--accent-soft); }
+        .style-card .sname { font-weight: 660; font-size: 17px; }
+        .style-card .desc { font-size: 14px; line-height: 1.55; color: var(--muted); margin-top: 5px; }
+        .style-card .words { font-size: 12px; color: var(--muted); }
+        .mode-option { flex: 1; min-width: 220px; display: flex; gap: 10px; align-items: flex-start; padding: 14px 16px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--control); cursor: pointer; }
+        .mode-option.active { border-color: var(--accent); background: var(--accent-soft); }
+        .mode-option input { margin-top: 3px; }
+        .mode-option strong { display: block; font-size: 16px; color: var(--ink); }
+        .mode-option em { display: block; margin-top: 4px; font-style: normal; font-size: 13px; line-height: 1.5; color: var(--muted); }
+        .style-list-card .sname,
+        .style-list-card .edit-inline[data-field="display_name"] { font-weight: 700; color: var(--ink); }
+        .style-list-card .desc { font-weight: 400; color: var(--muted); line-height: 1.6; }
+        .style-list-card .style-meta { font-size: 12px; color: var(--muted); line-height: 1.65; }
+        .article-box { margin-top: 12px; padding: 18px; background: var(--surface-solid); border: 1.2px solid var(--line);
+                       border-radius: 8px; white-space: pre-wrap; font-family: var(--font-reading); font-size: 18px; font-weight: 400;
+                       line-height: 1.9; }
+        .article-box .atitle { font-family: var(--font-display); font-size: 22px; font-weight: 680; margin-bottom: 12px; }
+        .tag { display: inline-block; padding: 2px 8px; background: var(--surface-soft);
+               border-radius: 4px; font-size: 12px; margin-right: 4px; }
+        .flash-error { padding: 12px; background: var(--danger-bg); border-radius: 6px;
+                       margin-bottom: 12px; color: var(--danger-text); }
+        .meta { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+        .empty { color: var(--muted); text-align: center; padding: 40px; }
+        .headline-selector { background: var(--surface-soft); border: 1.2px solid var(--line); border-radius: 6px; padding: 10px 14px; margin-bottom: 4px; }
+        .hl-pill { display: inline-block; padding: 4px 12px; background: var(--control); border: 1.2px solid var(--line); border-radius: 14px; font-size: 13px; cursor: pointer; user-select: none; transition: all 0.15s; color: var(--ink); }
+        .hl-pill:hover { border-color: var(--muted); background: var(--surface-soft); }
+        .hl-pill.active { border-color: var(--button-bg); background: var(--button-bg); color: var(--button-text); }
+        .hl-input { flex: 1; padding: 4px 10px; border: 1.2px solid var(--line); border-radius: 14px; font-size: 13px; outline: none; font-family: var(--font-ui); }
+        .hl-input:focus { border-color: var(--accent); }
+        .hl-badge { font-size: 12px; padding: 4px 10px; border-radius: 14px; background: #e8ffe8; color: #080; white-space: nowrap; display: none; }
+        .rewrite-box { margin-top: 10px; }
+        .rewrite-input { width: 100%; padding: 12px 14px; border: 1.2px solid var(--line); border-radius: 8px; font-size: 16px; outline: none; font-family: var(--font-reading); line-height: 1.75; resize: vertical; min-height: 52px; box-sizing: border-box; color: var(--ink); background: var(--control); }
+        .rewrite-input:focus { border-color: var(--accent); }
+        .rewrite-input:disabled { background: var(--control-disabled); }
+        .rewrite-submit { margin-top: 6px; }
+        .rewrite-result { margin-top: 8px; padding: 12px; background: var(--success-bg); border: 1px solid var(--success-line); border-radius: 6px; }
+        .results-card { margin-top: 26px; }
+        .article-result { margin-bottom: 30px; border-bottom: 1.2px solid var(--line); padding-bottom: 22px; }
+        .article-result:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+        .article-tools { margin-top: 16px; padding: 14px; border: 1.2px solid var(--line); border-radius: 8px; background: var(--surface-soft); display: grid; gap: 12px; }
+        .tool-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .tool-group + .tool-group { padding-top: 10px; border-top: 1px solid var(--line); }
+        .tool-label { min-width: 72px; color: var(--muted); font-size: 13px; font-weight: 600; }
+        .publish-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .publish-flow select { padding: 6px 10px; border: 1.2px solid var(--line); border-radius: 7px; font-size: 14px; }
+        .wechat-publish { background: #07c160 !important; color: #fff !important; border: none !important; }
+        .example-item { padding: 12px 14px; background: var(--surface-solid); border: 1.2px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
+        .example-content { font-size: 14px; color: var(--ink-soft); line-height: 1.8; white-space: pre-wrap; max-height: 170px; overflow: auto; }
+        .example-content.expanded { max-height: none; overflow: visible; }
+        .example-meta { font-size: 12px; color: var(--muted); margin-top: 6px; }
+        .example-toggle { border: 0; background: transparent; color: var(--ink-soft); cursor: pointer; font-size: 13px; padding: 0; }
+        .example-toggle:hover { color: var(--ink); }
+        .prompt-preview { display: none; margin-top: 12px; padding: 12px; border: 1.2px solid var(--line); border-radius: 8px; background: var(--surface-soft); }
+        .prompt-preview textarea { min-height: 260px; font-size: 14px; }
+        .prompt-preview-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: var(--muted); font-size: 13px; }
+        .file-drop { border: 2px dashed color-mix(in srgb, var(--line) 82%, var(--ink) 18%); border-radius: 8px; padding: 16px; text-align: center; font-size: 16px; color: var(--muted); margin-bottom: 8px; cursor: pointer; transition: all 0.15s; background: var(--surface-solid); }
+        .file-drop:hover, .file-drop.dragover { border-color: var(--accent); color: var(--ink); background: var(--accent-soft); }
+        @media (max-width: 768px) {
+            .sidebar { display: none; position: fixed; z-index: 99; width: 260px; box-shadow: 2px 0 12px rgba(0,0,0,0.15); }
+            .sidebar.open { display: flex; }
+            .sidebar-toggle { display: flex; align-items: center; justify-content: center; }
+            .main { padding: 20px 16px; }
+            .theme-switcher { top: 12px; right: 12px; }
+            .sidebar-footer { padding-bottom: 62px; }
+            .session-actions { opacity: 1; }
+            h1 { font-size: 30px; }
+            body { font-size: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="layout">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-mark">
+                    <span class="brand-icon-wrap">
+                        <img class="brand-icon" src="{{ url_for('static', filename='raven-writing-desk-logo.png') }}" alt="乌鸦写作台">
+                    </span>
+                    <span class="brand">乌鸦写作台</span>
+                </div>
+                <div class="brand-subtitle">Why is a raven like a writing desk?</div>
+                <a href="/" class="btn sidebar-new"><span aria-hidden="true">+</span><span>新建任务</span></a>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-section-title">工作区</div>
+                <a href="/" {% if request.path == '/' %}class="current"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4Z"></path><path d="M13 7l4 4"></path></svg>
+                    <span>写作台</span>
+                </a>
+                <a href="/history" {% if request.path == '/history' %}class="current"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v5l3 2"></path><path d="M4 12a8 8 0 1 0 2.3-5.7"></path><path d="M4 4v5h5"></path></svg>
+                    <span>历史</span>
+                </a>
+                <a href="/styles" {% if request.path == '/styles' %}class="current"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="7" cy="7" r="2.5"></circle><circle cx="17" cy="7" r="2.5"></circle><circle cx="7" cy="17" r="2.5"></circle><circle cx="17" cy="17" r="2.5"></circle></svg>
+                    <span>风格</span>
+                </a>
+                <div class="nav-section-title">工具</div>
+                <a href="/headline" {% if request.path == '/headline' %}class="current"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M4 12h10"></path><path d="M4 17h14"></path></svg>
+                    <span>标题工坊</span>
+                </a>
+                <a href="/review" {% if request.path == '/review' %}class="current"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6z"></path><path d="M9 8h6"></path><path d="M9 12h6"></path><path d="M9 16h3"></path></svg>
+                    <span>写作回顾</span>
+                </a>
+                <a href="/stats" {% if request.path == '/stats' %}class="current"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10"></path><path d="M12 20V4"></path><path d="M19 20v-7"></path></svg>
+                    <span>统计</span>
+                </a>
+            </nav>
+            <div class="sidebar-sessions">
+                <div class="title-row">
+                    <div class="title">最近任务</div>
+                    <button class="toggle-btn" id="sessionToggle" type="button" onclick="toggleSessions()" title="隐藏/显示最近任务">隐藏</button>
+                </div>
+                <div id="sessionList">
+                {% for s in sidebar_sessions %}
+                <div class="session-item" id="sidebar-session-{{ s.id }}">
+                    <a class="session-link" href="/session/{{ s.id }}">
+                        <div class="session-title">{{ s._title }}</div>
+                        <div class="sess-preview">{{ s._style_display }}</div>
+                        <div class="sess-style">{{ s.created_at }}</div>
+                    </a>
+                    <div class="session-actions" aria-label="任务操作">
+                        <button class="session-action" type="button" title="重命名" onclick="renameSession(event, {{ s.id }})">✎</button>
+                        <button class="session-action danger" type="button" title="删除" onclick="deleteSession(event, {{ s.id }})">×</button>
+                    </div>
+                </div>
+                {% endfor %}
+                </div>
+            </div>
+            <div class="sidebar-footer">
+                <a href="/settings" {% if request.path == '/settings' %}class="current"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M19 13.5v-3l-2.1-.4a6.6 6.6 0 0 0-.7-1.6l1.2-1.8-2.1-2.1-1.8 1.2a6.6 6.6 0 0 0-1.6-.7L11.5 3h-3l-.4 2.1a6.6 6.6 0 0 0-1.6.7L4.7 4.6 2.6 6.7l1.2 1.8a6.6 6.6 0 0 0-.7 1.6L1 10.5v3l2.1.4c.2.6.4 1.1.7 1.6l-1.2 1.8 2.1 2.1 1.8-1.2c.5.3 1 .5 1.6.7l.4 2.1h3l.4-2.1c.6-.2 1.1-.4 1.6-.7l1.8 1.2 2.1-2.1-1.2-1.8c.3-.5.5-1 .7-1.6l2.1-.4Z"></path></svg>
+                    <span>设置</span>
+                </a>
+            </div>
+        </aside>
+        <main class="main">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+    <div class="theme-switcher" aria-label="主题色">
+        <button type="button" class="theme-option" data-theme-option="black" onclick="setTheme('black')">黑色</button>
+        <button type="button" class="theme-option" data-theme-option="white" onclick="setTheme('white')">白色</button>
+        <button type="button" class="theme-option" data-theme-option="beige" onclick="setTheme('beige')">米黄</button>
+    </div>
+    <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">☰</button>
+    <script>
+    function setTheme(theme) {
+        document.documentElement.dataset.theme = theme;
+        localStorage.setItem('writingDeskTheme', theme);
+        document.querySelectorAll('[data-theme-option]').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.themeOption === theme);
+        });
+    }
+    setTheme(localStorage.getItem('writingDeskTheme') || document.documentElement.dataset.theme || 'beige');
+
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('open');
+    }
+
+    function toggleSessions() {
+        const list = document.getElementById('sessionList');
+        const btn = document.getElementById('sessionToggle');
+        const hidden = list.style.display === 'none';
+        list.style.display = hidden ? '' : 'none';
+        btn.textContent = hidden ? '隐藏' : '显示';
+        localStorage.setItem('sessionListHidden', hidden ? '' : '1');
+    }
+    // Apply saved state on load
+    (function() {
+        if (localStorage.getItem('sessionListHidden') === '1') {
+            document.getElementById('sessionList').style.display = 'none';
+            document.getElementById('sessionToggle').textContent = '显示';
+        }
+    })();
+
+    function renameSession(event, sessionId) {
+        event.preventDefault();
+        event.stopPropagation();
+        const item = document.getElementById('sidebar-session-' + sessionId);
+        const titleEl = item && item.querySelector('.session-title');
+        const currentTitle = titleEl ? titleEl.textContent.trim() : '';
+        const nextTitle = prompt('重命名最近任务', currentTitle || '');
+        if (nextTitle === null) return;
+        const title = nextTitle.trim();
+        if (!title) {
+            alert('标题不能为空');
+            return;
+        }
+        fetch('/api/v1/sessions/' + sessionId + '/rename', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({title})
+        }).then(r => r.json()).then(d => {
+            if (d.status === 'ok') {
+                if (titleEl) titleEl.textContent = d.title;
+            } else {
+                alert(d.message || '重命名失败');
+            }
+        }).catch(() => alert('重命名失败'));
+    }
+
+    function deleteSession(event, sessionId) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!confirm('确定删除这个任务吗？这会同步删除素材库里的原素材，以及这份素材下生成的文章。')) return;
+        fetch('/api/v1/sessions/' + sessionId, {method: 'DELETE'})
+        .then(r => r.json()).then(d => {
+            if (d.status === 'ok') {
+                const item = document.getElementById('sidebar-session-' + sessionId);
+                if (item) item.remove();
+                if (window.location.pathname === '/session/' + sessionId) {
+                    window.location.href = '/';
+                }
+            } else {
+                alert(d.message || '删除失败');
+            }
+        }).catch(() => alert('删除失败'));
+    }
+
+    // Close sidebar when clicking outside on mobile
+    document.addEventListener('click', function(e) {
+        const sidebar = document.getElementById('sidebar');
+        const toggle = document.getElementById('sidebarToggle');
+        if (window.innerWidth <= 768 && !sidebar.contains(e.target) && !toggle.contains(e.target)) {
+            sidebar.classList.remove('open');
+        }
+    });
+    </script>
+</body>
+</html>

@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>风格</h1>
+<div style="margin-bottom:16px;">
+    <button class="btn" onclick="showCreateForm()" id="createBtn">+ 新建风格</button>
+</div>
+<div id="createForm" style="display:none;" class="card">
+    <h2>新建风格</h2>
+    <div style="margin-bottom:8px;">
+        <div style="font-size:13px;color:#888;margin-bottom:4px;">上传 SKILL.md 文件</div>
+        <input type="file" id="skillFile" accept=".md" style="display:block;margin-bottom:8px;">
+        <div class="file-drop" onclick="document.getElementById('skillFile').click()">📂 点击选择 SKILL.md 文件</div>
+    </div>
+    <div style="margin-bottom:8px;">
+        <label style="font-size:13px;color:#888;display:block;margin-bottom:4px;">或直接填写</label>
+        <input type="text" id="newStyleName" placeholder="风格标识（英文/拼音，如 my_style）" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;margin-bottom:6px;outline:none;">
+        <input type="text" id="newStyleDisplay" placeholder="显示名称（如 我的风格）" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;margin-bottom:6px;outline:none;">
+        <input type="text" id="newStyleDesc" placeholder="简短描述" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;margin-bottom:6px;outline:none;">
+        <div style="font-size:13px;color:#888;margin:6px 0 4px;">参考素材文件（会自动解读成文字）</div>
+        <input type="file" id="draftExampleFiles" style="display:none" multiple onchange="handleDraftExampleFiles(event)">
+        <div class="file-drop" onclick="document.getElementById('draftExampleFiles').click()" style="margin-bottom:6px;">📎 点击上传参考文件（md/txt/csv/xlsx 等）</div>
+        <div id="draftExampleFileList" style="display:none;margin-bottom:6px;"></div>
+        <textarea id="newStyleExampleContent" rows="6" placeholder="粘贴一篇参考素材 / 代表文章..." style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;resize:vertical;font-family:inherit;margin-bottom:6px;"></textarea>
+        <div style="display:flex;gap:6px;margin-bottom:8px;">
+            <input type="text" id="newStyleExampleTitle" placeholder="标题（可选）" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;">
+            <input type="text" id="newStyleExampleSource" placeholder="来源（可选）" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;">
+            <button class="btn btn-secondary" onclick="addDraftExample()">添加</button>
+        </div>
+        <div id="draftExampleList" style="display:none;margin-bottom:8px;"></div>
+        <textarea id="newStylePrompt" rows="6" placeholder="写作指令 / Prompt 模板（从 skill 中复制）" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;resize:vertical;font-family:inherit;"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button class="btn btn-secondary" onclick="generatePromptFromExamples()">根据素材生成 Prompt</button>
+        <span id="draftPromptStatus" style="font-size:13px;color:#888;"></span>
+    </div>
+    <div style="margin-top:10px;">
+        <button class="btn" onclick="createStyle()">创建</button>
+        <button class="btn btn-secondary" onclick="hideCreateForm()" style="margin-left:6px;">取消</button>
+    </div>
+</div>
+
+<div class="style-grid" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));">
+{% for s in styles %}
+<a href="/styles/{{ s.name }}" class="card style-list-card" style="cursor:pointer;display:block;text-decoration:none;color:inherit;">
+    <div class="sname" style="font-size:16px;">
+        <span class="edit-inline" data-field="display_name" data-id="{{ s.name }}">{{ s.display_name }}</span>
+    </div>
+    <div class="desc" style="font-size:13px;margin:4px 0;">
+        描述：<span class="edit-inline" data-field="description" data-id="{{ s.name }}">{{ s.description }}</span>
+    </div>
+    <div class="style-meta" style="margin-top:4px;">
+        字数：<span class="edit-inline" data-field="word_count" data-id="{{ s.name }}" data-type="number">{{ s.config.get('word_count', '?') }}</span>
+        · 语气：<span class="edit-inline" data-field="tone" data-id="{{ s.name }}">{{ s.config.get('tone') }}</span>
+        · 结构：<span class="edit-inline" data-field="structure" data-id="{{ s.name }}">{{ s.config.get('structure') }}</span>
+    </div>
+    <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;">
+        <span class="tag">{{ '内置' if s.get('is_builtin') else '自定义' }}</span>
+        <span onclick="event.stopPropagation();event.preventDefault();useStyle('{{ s.name }}')" style="font-size:12px;color:#2563eb;cursor:pointer;">使用此风格 →</span>
+    </div>
+</a>
+{% endfor %}
+</div>
+
+<script>
+// Inline editing: click to edit, Enter to save
+document.querySelectorAll('.edit-inline').forEach(el => {
+    el.title = '点击编辑';
+    el.style.cursor = 'pointer';
+    el.style.borderBottom = '1px dashed #ccc';
+    el.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.querySelector('input')) return;
+        const current = this.textContent.trim();
+        const field = this.dataset.field;
+        const styleName = this.dataset.id;
+        const isNum = this.dataset.type === 'number';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = current;
+        input.style.width = isNum ? '50px' : '120px';
+        input.style.padding = '2px 6px';
+        input.style.border = '1px solid #888';
+        input.style.borderRadius = '4px';
+        input.style.fontSize = 'inherit';
+        this.textContent = '';
+        this.appendChild(input);
+        input.focus();
+        input.select();
+        function save() {
+            let val = input.value.trim();
+            if (!val) { reset(); return; }
+            fetch('/api/v1/styles/' + encodeURIComponent(styleName) + '/update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({field: field, value: val})
+            }).then(r => r.json()).then(d => {
+                if (d.status === 'ok') {
+                    el.textContent = val;
+                    showToast('✅ 已更新');
+                } else {
+                    reset();
+                    showToast('❌ ' + (d.message || '更新失败'));
+                }
+            }).catch(() => { reset(); showToast('❌ 请求失败'); });
+        }
+        function reset() {
+            el.textContent = current;
+        }
+        input.addEventListener('blur', save);
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); save(); }
+            if (e.key === 'Escape') { e.preventDefault(); reset(); }
+        });
+    });
+});
+// ─── Create style from skill ───
+let draftStyleFiles = [];
+let draftExamples = [];
+
+function showCreateForm() {
+    document.getElementById('createForm').style.display = 'block';
+    document.getElementById('createBtn').style.display = 'none';
+}
+function hideCreateForm() {
+    document.getElementById('createForm').style.display = 'none';
+    document.getElementById('createBtn').style.display = 'inline-block';
+}
+document.getElementById('skillFile').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+        const content = ev.target.result;
+        // Try to parse frontmatter for name/description
+        const nameMatch = content.match(/^---[\s\S]*?name:\s*(.+?)[\r\n]/m);
+        const descMatch = content.match(/^---[\s\S]*?description:\s*(.+?)[\r\n]/m);
+        if (nameMatch) document.getElementById('newStyleName').value = nameMatch[1].trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+        if (descMatch) document.getElementById('newStyleDesc').value = descMatch[1].trim();
+        // Extract the main prompt content (after frontmatter)
+        const body = content.replace(/^---[\s\S]*?---\s*/, '').trim();
+        document.getElementById('newStylePrompt').value = body;
+        document.getElementById('newStyleDisplay').focus();
+    };
+    reader.readAsText(file, 'UTF-8');
+});
+
+function handleDraftExampleFiles(event) {
+    const files = Array.from((event && event.target && event.target.files) || []);
+    files.forEach(file => {
+        const exists = draftStyleFiles.some(f => f.name === file.name && f.size === file.size);
+        if (exists) return;
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            draftStyleFiles.push({
+                name: file.name,
+                dataUrl: ev.target.result,
+                size: file.size || 0
+            });
+            renderDraftExampleFiles();
+        };
+        reader.readAsDataURL(file);
+    });
+    event.target.value = '';
+}
+
+function renderDraftExampleFiles() {
+    const container = document.getElementById('draftExampleFileList');
+    if (!draftStyleFiles.length) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+    container.style.display = 'block';
+    container.innerHTML = '<div style="font-size:12px;color:#888;margin-bottom:6px;">📎 已附加 ' + draftStyleFiles.length + ' 个参考文件</div>';
+    const list = document.createElement('div');
+    container.appendChild(list);
+    draftStyleFiles.forEach((file, idx) => {
+        const tag = document.createElement('div');
+        tag.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#f0f0f0;border:1px solid #ddd;border-radius:6px;margin:0 4px 4px 0;font-size:13px;';
+        tag.innerHTML = '📄 ' + escHtml(file.name) +
+            ' <span style="font-size:11px;color:#999;">(' + Math.max(1, Math.round((file.size || 0) / 1024)) + 'KB)</span>' +
+            ' <span style="cursor:pointer;color:#c00;margin-left:4px;" onclick="removeDraftExampleFile(' + idx + ')">✕</span>';
+        list.appendChild(tag);
+    });
+}
+
+function removeDraftExampleFile(index) {
+    draftStyleFiles.splice(index, 1);
+    renderDraftExampleFiles();
+}
+
+function addDraftExample() {
+    const contentEl = document.getElementById('newStyleExampleContent');
+    const titleEl = document.getElementById('newStyleExampleTitle');
+    const sourceEl = document.getElementById('newStyleExampleSource');
+    const content = contentEl.value.trim();
+    if (!content) { showToast('❓ 请先粘贴一篇素材'); return; }
+    const title = titleEl.value.trim() || ('参考素材 ' + (draftExamples.length + 1));
+    const source = sourceEl.value.trim();
+    draftExamples.push({title, content, source});
+    contentEl.value = '';
+    titleEl.value = '';
+    sourceEl.value = '';
+    renderDraftExampleList();
+    showToast('✅ 已添加到素材列表');
+}
+
+function renderDraftExampleList() {
+    const container = document.getElementById('draftExampleList');
+    if (!draftExamples.length) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+    container.style.display = 'block';
+    container.innerHTML = '';
+    draftExamples.forEach((example, idx) => {
+        const item = document.createElement('div');
+        item.style.cssText = 'border:1px solid #ddd;border-radius:8px;background:#fafafa;padding:10px 12px;margin-bottom:8px;';
+        item.innerHTML =
+            '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">' +
+            '<div style="flex:1;min-width:0;">' +
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">' +
+            '<div style="font-weight:650;font-size:14px;">' + escHtml(example.title) + '</div>' +
+            '<span style="font-size:12px;color:#888;">' + (example.content || '').length + ' 字</span>' +
+            (example.source ? '<span style="font-size:12px;color:#888;">来源：' + escHtml(example.source) + '</span>' : '') +
+            '</div>' +
+            '<div style="font-size:13px;color:#444;white-space:pre-wrap;line-height:1.6;max-height:132px;overflow:auto;">' + escHtml(example.content) + '</div>' +
+            '</div>' +
+            '<button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;flex-shrink:0;" onclick="removeDraftExample(' + idx + ')">✕</button>' +
+            '</div>';
+        container.appendChild(item);
+    });
+}
+
+function removeDraftExample(index) {
+    draftExamples.splice(index, 1);
+    renderDraftExampleList();
+}
+
+function createStyle() {
+    const name = document.getElementById('newStyleName').value.trim();
+    const display_name = document.getElementById('newStyleDisplay').value.trim();
+    const description = document.getElementById('newStyleDesc').value.trim();
+    const prompt_template = document.getElementById('newStylePrompt').value.trim();
+    if (!name || !display_name) { showToast('❓ 请填写标识和显示名称'); return; }
+    fetch('/api/v1/styles/create', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name, display_name, description, prompt_template})
+    }).then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            showToast('✅ 风格已创建，刷新页面查看');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showToast('❌ ' + (d.message || '创建失败'));
+        }
+    }).catch(() => showToast('❌ 请求失败'));
+}
+
+function generatePromptFromExamples() {
+    const display_name = document.getElementById('newStyleDisplay').value.trim();
+    const description = document.getElementById('newStyleDesc').value.trim();
+    const prompt_template = document.getElementById('newStylePrompt').value.trim();
+    const pendingContent = document.getElementById('newStyleExampleContent').value.trim();
+    const pendingTitle = document.getElementById('newStyleExampleTitle').value.trim();
+    const pendingSource = document.getElementById('newStyleExampleSource').value.trim();
+    if (pendingContent) {
+        draftExamples.push({
+            title: pendingTitle || ('参考素材 ' + (draftExamples.length + 1)),
+            content: pendingContent,
+            source: pendingSource
+        });
+        document.getElementById('newStyleExampleContent').value = '';
+        document.getElementById('newStyleExampleTitle').value = '';
+        document.getElementById('newStyleExampleSource').value = '';
+        renderDraftExampleList();
+    }
+    const examples = draftExamples.slice();
+    const status = document.getElementById('draftPromptStatus');
+    const file_payloads = draftStyleFiles.map(f => ({name: f.name, dataUrl: f.dataUrl, size: f.size || 0}));
+    if (!examples.length && !file_payloads.length) { showToast('❓ 请先粘贴参考素材或上传文件'); return; }
+    status.textContent = '⏳ 正在根据素材生成 Prompt...';
+    fetch('/api/v1/styles/draft-optimize', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({display_name, description, prompt_template, examples, file_payloads})
+    }).then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            document.getElementById('newStylePrompt').value = d.prompt_template || '';
+            status.textContent = '✅ Prompt 已生成，可以继续微调后创建';
+        } else {
+            status.textContent = '❌ ' + (d.message || '生成失败');
+        }
+    }).catch(() => status.textContent = '❌ 请求失败');
+}
+
+function useStyle(name) {
+    window.location.href = '/?preselect=' + encodeURIComponent(name);
+}
+
+function escHtml(text) {
+    return String(text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function showToast(msg) {
+    let t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 24px;border-radius:8px;font-size:14px;z-index:9999;transition:opacity 0.3s;';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 2000);
+}
+</script>
+{% endblock %}

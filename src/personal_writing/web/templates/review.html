@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>写作回顾</h1>
+
+<!-- AI 分析 -->
+<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <h2 style="margin:0;">AI 写作分析</h2>
+        {% if count > 0 %}
+        <button class="btn" onclick="runReview()">AI 分析</button>
+        {% endif %}
+    </div>
+    <div id="analysis-box">
+        {% if analysis %}
+        <div style="background:#f8f8ff;border:1px solid #e0e0f0;border-radius:6px;padding:16px;margin-bottom:16px;font-size:13px;white-space:pre-wrap;line-height:1.8;">{{ analysis }}</div>
+        {% endif %}
+    </div>
+
+    <!-- 历史分析记录 -->
+    {% if analysis_history %}
+    <details style="margin-top:8px;">
+        <summary style="font-size:13px;color:#888;cursor:pointer;">历史分析记录 ({{ analysis_history|length }})</summary>
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
+        {% for h in analysis_history %}
+            {% if not loop.first %}{# Skip the first one (already shown above) #}
+            <div class="analysis-history-item" style="background:#f8f8ff;border:1px solid #e0e0f0;border-radius:6px;padding:12px;font-size:13px;white-space:pre-wrap;line-height:1.8;max-height:200px;overflow:hidden;position:relative;">
+                <div style="font-size:11px;color:#888;margin-bottom:4px;">{{ h.created_at }} ({{ h.article_count }} 篇)</div>
+                <div style="max-height:120px;overflow:hidden;">{{ h.analysis[:600] }}{% if h.analysis|length > 600 %}...{% endif %}</div>
+            </div>
+            {% endif %}
+        {% endfor %}
+        </div>
+    </details>
+    {% endif %}
+</div>
+
+<!-- 初版 vs 最终版对比 -->
+<div class="card">
+    <h2>初版 vs 最终版</h2>
+    {% if count == 0 %}
+    <div class="empty">暂无已修改的文章</div>
+    {% else %}
+    <div style="font-size:13px;color:#888;margin-bottom:12px;">共 {{ count }} 篇有修改记录</div>
+    {% for a in articles %}
+    <div style="padding:12px 0;border-bottom:1px solid #eee;">
+        <div class="meta">
+            <span class="tag">{{ a.style }}</span>
+            {{ a.title or '(无标题)' }}
+            <span style="float:right;">{{ a.created_at }}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
+            <div>
+                <div style="font-size:12px;color:#c00;font-weight:600;margin-bottom:4px;">− 初版</div>
+                <div class="article-box" style="font-size:13px;max-height:200px;overflow:auto;">{{ a.original_content[:800]|strip_md }}{% if a.original_content|length > 800 %}...{% endif %}</div>
+            </div>
+            <div>
+                <div style="font-size:12px;color:#0a0;font-weight:600;margin-bottom:4px;">+ 最终版</div>
+                <div class="article-box" style="font-size:13px;max-height:200px;overflow:auto;">{{ a.content[:800]|strip_md }}{% if a.content|length > 800 %}...{% endif %}</div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+</div>
+
+<script>
+function runReview() {
+    const box = document.getElementById('analysis-box');
+    box.innerHTML = '<div style="color:#888;padding:16px;">AI 分析修改模式中...</div>';
+    fetch('/api/v1/review/generate', {method: 'POST'})
+    .then(r => r.json()).then(d => {
+        if (d.status === 'ok' && d.analysis) {
+            box.innerHTML = '<div style="background:#f8f8ff;border:1px solid #e0e0f0;border-radius:6px;padding:16px;margin-bottom:16px;font-size:13px;white-space:pre-wrap;line-height:1.8;">' + d.analysis + '</div>';
+        } else {
+            box.innerHTML = '<div style="color:#c00;padding:8px;">分析失败</div>';
+        }
+    }).catch(() => {
+        box.innerHTML = '<div style="color:#c00;padding:8px;">请求失败</div>';
+    });
+}
+</script>
+{% endblock %}

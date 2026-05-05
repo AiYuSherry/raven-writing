@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>素材库</h1>
+
+<!-- 搜索 -->
+<div class="card" style="padding:12px 16px;">
+    <form method="GET" action="/materials" style="display:flex;gap:8px;">
+        <input type="text" name="q" placeholder="搜索素材内容..." value="{{ query or '' }}"
+               style="flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;outline:none;">
+        <button type="submit" class="btn" style="padding:8px 20px;">搜索</button>
+        {% if query %}
+        <a href="/materials" class="btn btn-secondary" style="padding:8px 16px;text-decoration:none;">清除</a>
+        {% endif %}
+    </form>
+</div>
+
+{% if not materials %}
+<div class="empty">{{ '未找到匹配的素材' if query else '暂无素材，去写作台写一篇吧' }}</div>
+{% else %}
+<div style="display:flex;flex-direction:column;gap:12px;">
+{% for m in materials %}
+<div class="card" id="mat-{{ m.id }}" style="position:relative;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+        <div>
+            <div style="font-size:15px;font-weight:600;">{{ m._display_title }}</div>
+            <div class="meta" style="margin-bottom:0;">
+                #{{ m.id }} · {{ m.source_type }} · {{ m.created_at }}
+                {% if m.raw_content %}({{ m.raw_content|length }} 字){% endif %}
+            </div>
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0;margin-left:8px;">
+            <a href="/material/{{ m.id }}" class="btn btn-secondary" style="font-size:11px;padding:3px 10px;text-decoration:none;">查看</a>
+            <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px;color:#c00;border-color:#ecc;" onclick="deleteMaterial({{ m.id }})">删除</button>
+        </div>
+    </div>
+    <div style="font-size:13px;color:#555;line-height:1.6;background:#fafafa;padding:10px;border-radius:6px;max-height:120px;overflow:hidden;">
+        {{ m.raw_content[:400] }}{% if m.raw_content|length > 400 %}...{% endif %}
+    </div>
+</div>
+{% endfor %}
+</div>
+{% endif %}
+
+<script>
+function deleteMaterial(id) {
+    if (!confirm('确定删除这条素材？')) return;
+    fetch('/api/v1/material/' + id, {method: 'DELETE'})
+    .then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            const el = document.getElementById('mat-' + id);
+            if (el) el.style.display = 'none';
+            showToast('已删除');
+        } else {
+            showToast('删除失败');
+        }
+    }).catch(() => showToast('请求失败'));
+}
+function showToast(msg) {
+    let t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 24px;border-radius:8px;font-size:14px;z-index:9999;';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 2000);
+}
+</script>
+{% endblock %}

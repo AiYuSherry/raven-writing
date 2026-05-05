@@ -1,0 +1,377 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ style.display_name }}</h1>
+<div class="meta" style="margin-bottom:16px;">
+    {{ style.name }} · {{ '内置' if style.is_builtin else '自定义' }}
+</div>
+
+<!-- 基本信息 -->
+<div class="card">
+    <h2>基本信息</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;">
+        <div>
+            <label style="display:block;color:#888;margin-bottom:2px;">字数</label>
+            <input type="number" id="cfg_word_count" value="{{ style.config.get('word_count', 800) }}"
+                   style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;">
+        </div>
+        <div>
+            <label style="display:block;color:#888;margin-bottom:2px;">语气</label>
+            <select id="cfg_tone" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;background:#fff;">
+                <option value="casual" {{ 'selected' if style.config.get('tone') == 'casual' }}>日常 casual</option>
+                <option value="warm" {{ 'selected' if style.config.get('tone') == 'warm' }}>温暖 warm</option>
+                <option value="objective" {{ 'selected' if style.config.get('tone') == 'objective' }}>客观 objective</option>
+                <option value="authoritative" {{ 'selected' if style.config.get('tone') == 'authoritative' }}>权威 authoritative</option>
+            </select>
+        </div>
+        <div>
+            <label style="display:block;color:#888;margin-bottom:2px;">结构</label>
+            <select id="cfg_structure" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;background:#fff;">
+                <option value="free_flow" {{ 'selected' if style.config.get('structure') == 'free_flow' }}>自由流动 free_flow</option>
+                <option value="numbered_sections" {{ 'selected' if style.config.get('structure') == 'numbered_sections' }}>分节论述 numbered_sections</option>
+                <option value="pain_point_to_solution" {{ 'selected' if style.config.get('structure') == 'pain_point_to_solution' }}>痛点→方案 pain_point_to_solution</option>
+                <option value="hook_to_content" {{ 'selected' if style.config.get('structure') == 'hook_to_content' }}>钩子→内容 hook_to_content</option>
+            </select>
+        </div>
+        <div>
+            <label style="display:block;color:#888;margin-bottom:2px;">人称</label>
+            <select id="cfg_personal_pronoun" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;background:#fff;">
+                <option value="first_person" {{ 'selected' if style.config.get('personal_pronoun') == 'first_person' }}>第一人称 first_person</option>
+                <option value="second_person" {{ 'selected' if style.config.get('personal_pronoun') == 'second_person' }}>第二人称 second_person</option>
+                <option value="mixed" {{ 'selected' if style.config.get('personal_pronoun') == 'mixed' }}>混合 mixed</option>
+            </select>
+        </div>
+        <div>
+            <label style="display:block;color:#888;margin-bottom:2px;">句子长度</label>
+            <select id="cfg_sentence_length" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;background:#fff;">
+                <option value="short" {{ 'selected' if style.config.get('sentence_length') == 'short' }}>短 short</option>
+                <option value="medium" {{ 'selected' if style.config.get('sentence_length') == 'medium' }}>中 medium</option>
+                <option value="short_to_medium" {{ 'selected' if style.config.get('sentence_length') == 'short_to_medium' }}>短-中 short_to_medium</option>
+                <option value="very_short" {{ 'selected' if style.config.get('sentence_length') == 'very_short' }}>极短 very_short</option>
+            </select>
+        </div>
+        <div>
+            <label style="display:block;color:#888;margin-bottom:2px;">段落密度</label>
+            <select id="cfg_paragraph_density" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;background:#fff;">
+                <option value="tight" {{ 'selected' if style.config.get('paragraph_density') == 'tight' }}>紧凑 tight</option>
+                <option value="normal" {{ 'selected' if style.config.get('paragraph_density') == 'normal' }}>正常 normal</option>
+                <option value="loose" {{ 'selected' if style.config.get('paragraph_density') == 'loose' }}>松散 loose</option>
+            </select>
+        </div>
+        <div>
+            <label style="display:block;color:#888;margin-bottom:2px;">幽默风格</label>
+            <select id="cfg_humor_style" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;background:#fff;">
+                <option value="self_deprecating" {{ 'selected' if style.config.get('humor_style') == 'self_deprecating' }}>自嘲 self_deprecating</option>
+                <option value="dry" {{ 'selected' if style.config.get('humor_style') == 'dry' }}>冷幽默 dry</option>
+                <option value="none" {{ 'selected' if style.config.get('humor_style') == 'none' }}>无 none</option>
+            </select>
+        </div>
+        <div>
+            <label style="display:block;color:#888;margin-bottom:2px;">结尾风格</label>
+            <select id="cfg_ending_style" style="width:100%;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;background:#fff;">
+                <option value="open_ended" {{ 'selected' if style.config.get('ending_style') == 'open_ended' }}>开放式 open_ended</option>
+                <option value="summary" {{ 'selected' if style.config.get('ending_style') == 'summary' }}>总结 summary</option>
+                <option value="emotional" {{ 'selected' if style.config.get('ending_style') == 'emotional' }}>情感升华 emotional</option>
+            </select>
+        </div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:12px;align-items:center;">
+        <div>
+            <label style="display:block;color:#888;margin-bottom:2px;font-size:13px;">输出形态</label>
+            <select id="cfg_output_form" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;background:#fff;">
+                <option value="auto" {{ 'selected' if style.config.get('output_form', 'auto') == 'auto' }}>自动判断 auto</option>
+                <option value="文章" {{ 'selected' if style.config.get('output_form') == '文章' }}>文章</option>
+                <option value="歌词" {{ 'selected' if style.config.get('output_form') == '歌词' }}>歌词</option>
+                <option value="诗歌" {{ 'selected' if style.config.get('output_form') == '诗歌' }}>诗歌</option>
+            </select>
+        </div>
+    </div>
+    <div style="margin-top:12px;">
+        <button class="btn" onclick="saveConfig()">保存基本信息</button>
+        <span id="configStatus" style="font-size:13px;color:#888;margin-left:8px;"></span>
+    </div>
+</div>
+
+<!-- Skill / Prompt 模板 -->
+<div class="card">
+    <h2>写作指令 / Prompt</h2>
+    <textarea id="promptArea" style="min-height:300px;font-size:13px;">{{ style.prompt_template }}</textarea>
+    <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+        <button class="btn" onclick="savePrompt()">保存 Prompt</button>
+        <button class="btn btn-secondary" onclick="optimizePrompt()">从素材优化</button>
+        {% if style.is_builtin %}
+        <button class="btn btn-secondary" onclick="resetPrompt()">恢复内置 Prompt</button>
+        {% endif %}
+        <span id="promptStatus" style="font-size:13px;color:#888;margin-left:4px;"></span>
+    </div>
+    <div class="prompt-preview" id="promptPreview">
+        <div class="prompt-preview-title">
+            <span>优化预览，不会自动覆盖上方 Prompt</span>
+            <span id="previewMeta"></span>
+        </div>
+        <textarea id="optimizedPromptArea"></textarea>
+        <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn" onclick="applyOptimizedPrompt()">采纳到 Prompt</button>
+            <button class="btn btn-secondary" onclick="closeOptimizedPrompt()">关闭预览</button>
+        </div>
+    </div>
+</div>
+
+<!-- 参考文章 / 素材 -->
+<div class="card">
+    <h2>参考文章 / 素材</h2>
+    <div style="margin-bottom:12px;">
+        <textarea id="exampleContent" rows="4" placeholder="粘贴参考文章内容..." style="font-size:13px;min-height:80px;font-family:inherit;"></textarea>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+            <input type="text" id="exampleTitle" placeholder="标题（可选）" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;">
+            <input type="text" id="exampleSource" placeholder="来源（可选）" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;">
+            <button class="btn" onclick="addExample()">添加</button>
+        </div>
+    </div>
+    <div id="exampleList">
+        {% for ex in style.examples %}
+        <div class="example-item">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div style="flex:1;">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+                        {% if ex.title %}<div style="font-weight:650;font-size:14px;">{{ ex.title }}</div>{% endif %}
+                        <span class="example-meta">{{ ex.content|length }} 字</span>
+                        {% if ex.content|length > 500 %}
+                        <button type="button" class="example-toggle" onclick="toggleExample(this)">展开全文</button>
+                        {% endif %}
+                    </div>
+                    <div class="example-content">{{ ex.content }}</div>
+                    {% if ex.source %}<div class="example-meta">来源：{{ ex.source }}</div>{% endif %}
+                </div>
+                <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;flex-shrink:0;margin-left:8px;" onclick="deleteExample({{ ex.id }})">✕</button>
+            </div>
+        </div>
+        {% endfor %}
+        {% if not style.examples %}
+        <div class="empty" style="padding:16px;">暂无参考文章</div>
+        {% endif %}
+    </div>
+</div>
+
+{% if style.orphaned_examples %}
+<div class="card" style="border-color:var(--accent);">
+    <h2 style="color:var(--accent);">未关联素材</h2>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">以下素材所属的风格已被删除，可认领到当前风格</div>
+    <div id="orphanedList">
+        {% for ex in style.orphaned_examples %}
+        <div class="orphaned-example-item" data-id="{{ ex.id }}" style="padding:12px 14px;background:var(--surface-solid);border:1.2px solid var(--line);border-radius:7px;margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div style="flex:1;">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+                        {% if ex.title %}<div style="font-weight:650;font-size:14px;">{{ ex.title }}</div>{% endif %}
+                        <span style="font-size:12px;color:var(--muted);">{{ ex.content|length }} 字</span>
+                    </div>
+                    <div style="font-size:13px;color:var(--ink-soft);line-height:1.7;white-space:pre-wrap;max-height:100px;overflow:hidden;">{{ ex.content[:300] }}{% if ex.content|length > 300 %}...{% endif %}</div>
+                </div>
+                <div style="display:flex;gap:6px;flex-shrink:0;margin-left:10px;">
+                    <button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;" type="button" onclick="reclaimExample({{ ex.id }})">认领</button>
+                    <button class="btn btn-secondary" style="font-size:12px;padding:4px 10px;" type="button" onclick="deleteExample({{ ex.id }})">删除</button>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    <div style="margin-top:8px;">
+        <button class="btn" type="button" onclick="reclaimAllOrphaned()">全部认领</button>
+        <span id="reclaimStatus" style="font-size:13px;color:var(--muted);margin-left:8px;"></span>
+    </div>
+</div>
+{% endif %}
+
+<script>
+function saveConfig() {
+    const fields = ['word_count', 'tone', 'structure', 'personal_pronoun', 'sentence_length', 'paragraph_density', 'humor_style', 'ending_style', 'output_form'];
+    const config = {};
+    fields.forEach(f => {
+        const el = document.getElementById('cfg_' + f);
+        if (el) config[f] = el.value;
+    });
+    config.word_count = parseInt(config.word_count) || 800;
+    const status = document.getElementById('configStatus');
+    status.textContent = '⏳ 保存中...';
+    fetch('/api/v1/styles/{{ style.name }}/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({config: config})
+    }).then(r => r.json()).then(d => {
+        status.textContent = d.status === 'ok' ? '✅ 已保存' : '❌ ' + (d.message || '保存失败');
+    }).catch(() => status.textContent = '❌ 请求失败');
+}
+
+function savePrompt() {
+    const prompt = document.getElementById('promptArea').value;
+    const status = document.getElementById('promptStatus');
+    status.textContent = '⏳ 保存中...';
+    fetch('/api/v1/styles/{{ style.name }}/prompt', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({prompt_template: prompt})
+    }).then(r => r.json()).then(d => {
+        status.textContent = d.status === 'ok' ? '✅ 已保存' : '❌ ' + (d.message || '保存失败');
+    }).catch(() => status.textContent = '❌ 请求失败');
+}
+
+function optimizePrompt() {
+    const status = document.getElementById('promptStatus');
+    status.textContent = '⏳ AI 优化中...';
+    fetch('/api/v1/styles/{{ style.name }}/optimize-prompt', {method: 'POST'})
+    .then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            const preview = document.getElementById('promptPreview');
+            const optimized = document.getElementById('optimizedPromptArea');
+            optimized.value = d.prompt_template;
+            preview.style.display = 'block';
+            document.getElementById('previewMeta').textContent = d.prompt_template.length + ' 字';
+            status.textContent = '✅ 优化完成，请先预览，再决定是否采纳';
+        } else {
+            status.textContent = '❌ ' + (d.message || '优化失败');
+        }
+    }).catch(() => status.textContent = '❌ 请求失败');
+}
+
+function applyOptimizedPrompt() {
+    const optimized = document.getElementById('optimizedPromptArea').value.trim();
+    if (!optimized) return;
+    document.getElementById('promptArea').value = optimized;
+    document.getElementById('promptStatus').textContent = '已采纳到上方，请点击保存 Prompt 生效';
+}
+
+function closeOptimizedPrompt() {
+    document.getElementById('promptPreview').style.display = 'none';
+}
+
+function resetPrompt() {
+    if (!confirm('恢复内置 Prompt 会替换当前编辑框内容，但不会删除参考文章。继续吗？')) return;
+    const status = document.getElementById('promptStatus');
+    status.textContent = '⏳ 恢复中...';
+    fetch('/api/v1/styles/{{ style.name }}/prompt/reset', {method: 'POST'})
+    .then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            document.getElementById('promptArea').value = d.prompt_template;
+            status.textContent = '✅ 已恢复内置 Prompt';
+            closeOptimizedPrompt();
+        } else {
+            status.textContent = '❌ ' + (d.message || '恢复失败');
+        }
+    }).catch(() => status.textContent = '❌ 请求失败');
+}
+
+function addExample() {
+    const content = document.getElementById('exampleContent').value.trim();
+    if (!content) { showToast('❓ 粘贴参考文章内容'); return; }
+    const title = document.getElementById('exampleTitle').value.trim();
+    const source = document.getElementById('exampleSource').value.trim();
+    fetch('/api/v1/styles/{{ style.name }}/examples', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({title, content, source})
+    }).then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            document.getElementById('exampleContent').value = '';
+            document.getElementById('exampleTitle').value = '';
+            document.getElementById('exampleSource').value = '';
+            showToast('✅ 已添加');
+            location.reload();
+        } else {
+            showToast('❌ ' + (d.message || '添加失败'));
+        }
+    }).catch(() => showToast('❌ 请求失败'));
+}
+
+function deleteExample(id) {
+    if (!confirm('确定删除这条参考文章？')) return;
+    fetch('/api/v1/styles/examples/' + id, {method: 'DELETE'})
+    .then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            showToast('✅ 已删除');
+            location.reload();
+        }
+    }).catch(() => showToast('❌ 删除失败'));
+}
+
+function reclaimExample(id) {
+    const status = document.getElementById('reclaimStatus');
+    status.textContent = '⏳ 认领中...';
+    fetch('/api/v1/styles/{{ style.name }}/examples/reclaim', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({example_ids: [id]})
+    }).then(r => r.json()).then(d => {
+        if (d.status === 'ok' && d.reclaimed > 0) {
+            const item = document.querySelector('.orphaned-example-item[data-id="' + id + '"]');
+            if (item) item.remove();
+            status.textContent = '✅ 已认领，刷新页面可见';
+            setTimeout(() => location.reload(), 500);
+        } else {
+            status.textContent = '❌ ' + (d.message || '认领失败');
+        }
+    }).catch(() => status.textContent = '❌ 请求失败');
+}
+
+function reclaimAllOrphaned() {
+    const items = document.querySelectorAll('.orphaned-example-item');
+    const ids = Array.from(items).map(el => parseInt(el.dataset.id));
+    if (ids.length === 0) return;
+    const status = document.getElementById('reclaimStatus');
+    status.textContent = '⏳ 认领 ' + ids.length + ' 条素材...';
+    fetch('/api/v1/styles/{{ style.name }}/examples/reclaim', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({example_ids: ids})
+    }).then(r => r.json()).then(d => {
+        if (d.status === 'ok' && d.reclaimed > 0) {
+            status.textContent = '✅ 成功认领 ' + d.reclaimed + ' 条素材';
+            setTimeout(() => location.reload(), 500);
+        } else {
+            status.textContent = '❌ ' + (d.message || '认领失败');
+        }
+    }).catch(() => status.textContent = '❌ 请求失败');
+}
+
+function toggleExample(btn) {
+    const item = btn.closest('.example-item');
+    const content = item.querySelector('.example-content');
+    const expanded = content.classList.toggle('expanded');
+    btn.textContent = expanded ? '收起' : '展开全文';
+}
+
+function showToast(msg) {
+    let t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:10px 24px;border-radius:8px;font-size:14px;z-index:9999;transition:opacity 0.3s;';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 2000);
+}
+
+// ─── Clipboard paste file support for examples ───
+document.addEventListener('DOMContentLoaded', function() {
+    const exampleInput = document.getElementById('exampleContent');
+    if (exampleInput) {
+        exampleInput.addEventListener('paste', function(e) {
+            const files = e.clipboardData.files;
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.name && (file.name.endsWith('.txt') || file.name.endsWith('.md'))) {
+                    e.preventDefault();
+                    const reader = new FileReader();
+                    reader.onload = function(ev) {
+                        // Auto-fill: filename as title, content as example
+                        const titleInput = document.getElementById('exampleTitle');
+                        if (titleInput && !titleInput.value.trim()) {
+                            titleInput.value = file.name.replace(/\.(txt|md)$/, '');
+                        }
+                        exampleInput.value = ev.target.result;
+                        showToast('✅ 已读取文件: ' + file.name);
+                    };
+                    reader.readAsText(file, 'UTF-8');
+                }
+            }
+        });
+    }
+});
+</script>
+{% endblock %}
