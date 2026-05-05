@@ -2,7 +2,7 @@
 {% block content %}
 <h1>标题工坊</h1>
 <div style="display:flex;gap:12px;margin:0 0 16px;">
-    <div onclick="switchTab('generate')" id="tab-generate-btn" style="flex:1;display:block;text-align:center;padding:14px 0;font-size:17px;font-weight:700;text-decoration:none;border-radius:10px;background:var(--surface-soft);color:var(--ink);letter-spacing:2px;cursor:pointer;border:1.2px solid var(--line);">标题生成</div>
+    <div onclick="switchTab('generate')" id="tab-generate-btn" style="flex:1;display:block;text-align:center;padding:14px 0;font-size:17px;font-weight:700;text-decoration:none;border-radius:10px;background:var(--surface-solid);color:var(--ink);letter-spacing:2px;cursor:pointer;border:1.2px solid var(--line);">标题生成</div>
     <div onclick="switchTab('accumulate')" id="tab-accumulate-btn" style="flex:1;display:block;text-align:center;padding:14px 0;font-size:17px;font-weight:700;text-decoration:none;border-radius:10px;background:var(--surface-soft);color:var(--ink);letter-spacing:2px;cursor:pointer;border:1.2px solid var(--line);">标题积累</div>
 </div>
 <div id="tab-generate-content">
@@ -226,21 +226,21 @@ function switchTab(tab) {
     if (tab === 'generate') {
         genContent.style.display = 'block';
         accContent.style.display = 'none';
-        genBtn.style.background = 'var(--theme)';
-        genBtn.style.color = '#fff';
-        genBtn.style.borderColor = 'transparent';
+        genBtn.style.background = 'var(--surface-solid)';
+        genBtn.style.color = 'var(--ink)';
+        genBtn.style.boxShadow = 'inset 0 -2.5px 0 var(--theme)';
         accBtn.style.background = 'var(--surface-soft)';
         accBtn.style.color = 'var(--ink)';
-        accBtn.style.borderColor = 'var(--line)';
+        accBtn.style.boxShadow = 'none';
     } else {
         genContent.style.display = 'none';
         accContent.style.display = 'block';
-        accBtn.style.background = 'var(--theme)';
-        accBtn.style.color = '#fff';
-        accBtn.style.borderColor = 'transparent';
+        accBtn.style.background = 'var(--surface-solid)';
+        accBtn.style.color = 'var(--ink)';
+        accBtn.style.boxShadow = 'inset 0 -2.5px 0 var(--theme)';
         genBtn.style.background = 'var(--surface-soft)';
         genBtn.style.color = 'var(--ink)';
-        genBtn.style.borderColor = 'var(--line)';
+        genBtn.style.boxShadow = 'none';
     }
 }
 
