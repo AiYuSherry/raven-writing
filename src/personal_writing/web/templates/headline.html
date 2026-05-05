@@ -3,8 +3,11 @@
 <h1>标题工坊</h1>
 <form method="POST">
     <div class="card">
-        <h2>素材</h2>
-        <textarea name="content" placeholder="粘贴素材内容...">{{ content or '' }}</textarea>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h2 style="margin-bottom:0;">素材</h2>
+            <button class="btn btn-secondary" type="button" onclick="clearContent()" style="padding:4px 12px;font-size:13px;">清空</button>
+        </div>
+        <textarea id="materialContent" name="content" placeholder="粘贴素材内容...">{{ content or '' }}</textarea>
     </div>
     <div class="card" style="padding-bottom:20px;margin-bottom:0;">
         <h2>风格筛选（可选）</h2>
@@ -22,9 +25,12 @@
     </div>
 </form>
 {% if result %}
-<div class="card">
-    <h2>标题候选</h2>
-    <div style="display:flex;flex-direction:column;gap:8px;">
+<div class="card" id="headlineResultCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h2 style="margin-bottom:0;">标题候选</h2>
+        <button class="btn btn-secondary" type="button" onclick="regenerateHeadlines()" id="regenerateBtn" style="padding:6px 16px;font-size:14px;">重新生成</button>
+    </div>
+    <div id="headlineCandidates" style="display:flex;flex-direction:column;gap:8px;">
     {% for headline, formula in result %}
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:var(--surface-soft);border:1.2px solid var(--line);border-radius:6px;">
             <div>
@@ -333,6 +339,54 @@ function cancelHeadlineEdit(id) {
     if (!item) return;
     const form = item.querySelector('.hl-edit-form');
     form.style.display = 'none';
+}
+
+// ─── 清空素材 ───
+
+function clearContent() {
+    document.getElementById('materialContent').value = '';
+    document.getElementById('materialContent').focus();
+}
+
+// ─── 重新生成标题 ───
+
+function regenerateHeadlines() {
+    const content = document.getElementById('materialContent').value.trim();
+    if (!content) { alert('请先粘贴素材'); return; }
+    const style = document.querySelector('select[name="style"]').value;
+    const btn = document.getElementById('regenerateBtn');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ 生成中...';
+
+    fetch('/api/v1/headlines/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({content, style})
+    }).then(r => r.json()).then(d => {
+        btn.disabled = false;
+        btn.textContent = origText;
+        if (d.status !== 'ok') { alert(d.message || '生成失败'); return; }
+        // Replace candidate list
+        const container = document.getElementById('headlineCandidates');
+        container.innerHTML = d.candidates.map(function(c) {
+            const headline = c.headline;
+            const formula = c.formula || '自由创作';
+            const escaped = headline.replace(/'/g, "\\'");
+            return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:var(--surface-soft);border:1.2px solid var(--line);border-radius:6px;">' +
+                '<div><div style="font-size:14px;font-weight:500;">' + headline + '</div>' +
+                '<div style="font-size:12px;color:#999;">公式：' + formula + '</div></div>' +
+                '<div style="display:flex;gap:8px;flex-shrink:0;">' +
+                '<button class="btn btn-secondary" type="button" onclick="copyHeadline(\'' + escaped + '\')">复制</button>' +
+                '<button class="btn btn-secondary" type="button" onclick="saveHeadline(\'' + escaped + '\', \'' + formula.replace(/'/g, "\\'") + '\')">积累</button></div></div>';
+        }).join('');
+        // Scroll to results
+        document.getElementById('headlineResultCard').scrollIntoView({behavior: 'smooth', block: 'start'});
+    }).catch(function(e) {
+        btn.disabled = false;
+        btn.textContent = origText;
+        alert('网络错误: ' + e.message);
+    });
 }
 
 // ─── 自己撰写标题 ───

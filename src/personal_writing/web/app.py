@@ -492,17 +492,27 @@ def create_app():
                     result = f"出错: {e}"
         headline_library = HeadlineLibraryRepo.list(selected_style or "", limit=30)
         analyses_history = HeadlineAnalysisRepo.list(limit=10)
-        # Load generation history for current content
+        # Load generation history: always show recent, plus content-specific if available
         generation_history = []
+        recent = HeadlineGenerationRepo.list_recent(limit=8)
+        for g in recent:
+            try:
+                g["_items"] = json.loads(g.get("result", "[]"))
+            except Exception:
+                g["_items"] = []
+            generation_history.append(g)
+        # For POST with content, also add content-specific history (avoid duplicates)
         if content.strip():
             content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
-            raw_history = HeadlineGenerationRepo.list_by_content_hash(content_hash, limit=5)
-            for g in raw_history:
-                try:
-                    g["_items"] = json.loads(g.get("result", "[]"))
-                except Exception:
-                    g["_items"] = []
-                generation_history.append(g)
+            extra = HeadlineGenerationRepo.list_by_content_hash(content_hash, limit=5)
+            seen_ids = {g["id"] for g in generation_history}
+            for g in extra:
+                if g["id"] not in seen_ids:
+                    try:
+                        g["_items"] = json.loads(g.get("result", "[]"))
+                    except Exception:
+                        g["_items"] = []
+                    generation_history.append(g)
         return render_template("headline.html", styles=styles, content=content, selected_style=selected_style, result=result, headline_library=headline_library, analyses_history=analyses_history, generation_history=generation_history)
 
     @app.route("/settings")
@@ -809,6 +819,25 @@ def create_app():
             })
         except Exception as e:
             return jsonify({"status": "error", "message": f"分析失败: {str(e)}"}), 500
+
+    @app.route("/api/v1/headlines/generate", methods=["POST"])
+    def api_generate_headlines():
+        """Generate headline candidates via AJAX (no page reload)."""
+        data = request.get_json() or {}
+        content = (data.get("content", "") or "").strip()
+        style = (data.get("style", "") or "").strip()
+        if not content:
+            return jsonify({"status": "error", "message": "素材不能为空"}), 400
+        try:
+            result = pipeline.generate_headlines(content, style or None)
+            # Save to generation history
+            content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
+            content_preview = content[:100].replace("\n", " ")
+            result_json = json.dumps([{"headline": h, "formula": f} for h, f in result], ensure_ascii=False)
+            HeadlineGenerationRepo.create(content_hash, content_preview, style, result_json)
+            return jsonify({"status": "ok", "candidates": [{"headline": h, "formula": f} for h, f in result]})
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
 
     @app.route("/api/v1/headlines/analysis", methods=["GET"])
     def api_list_headline_analysis():
