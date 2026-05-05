@@ -1,7 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>标题工坊</h1>
-<div style="font-size:13px;color:var(--muted);letter-spacing:1px;font-weight:600;margin:0 0 12px;padding-bottom:6px;border-bottom:1.2px solid var(--line);">标题生成</div>
+<div style="display:flex;gap:20px;margin:0 0 12px;padding-bottom:6px;border-bottom:1.2px solid var(--line);font-size:13px;font-weight:600;letter-spacing:1px;">
+    <a href="#section-generate" style="color:var(--ink);text-decoration:none;padding:4px 0;border-bottom:2px solid var(--theme);margin-bottom:-7px;">标题生成</a>
+    <a href="#section-accumulate" style="color:var(--muted);text-decoration:none;padding:4px 0;">标题积累</a>
+</div>
+<div id="section-generate"></div>
 <form method="POST">
     <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
@@ -62,6 +66,7 @@
 </div>
 {% endif %}
 
+<div id="section-accumulate"></div>
 <div style="font-size:13px;color:var(--muted);letter-spacing:1px;font-weight:600;margin:28px 0 12px;padding-bottom:6px;border-bottom:1.2px solid var(--line);">标题积累</div>
 <div class="card">
     <h2>标题积累</h2>
