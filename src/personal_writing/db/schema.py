@@ -133,6 +133,7 @@ CREATE TABLE IF NOT EXISTS headline_generation_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     content_hash TEXT NOT NULL,
     content_preview TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL DEFAULT '',
     style TEXT DEFAULT '',
     result TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -168,6 +169,7 @@ MIGRATIONS = [
     "ALTER TABLE articles ADD COLUMN original_title TEXT DEFAULT ''",
     "UPDATE articles SET original_title = title WHERE original_title IS NULL OR original_title = ''",
     "ALTER TABLE sessions ADD COLUMN title TEXT DEFAULT ''",
+    "ALTER TABLE headline_generation_history ADD COLUMN content TEXT DEFAULT ''",
     """CREATE TABLE IF NOT EXISTS headline_library (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         headline TEXT NOT NULL,

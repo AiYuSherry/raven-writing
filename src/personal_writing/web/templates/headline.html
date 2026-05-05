@@ -178,9 +178,12 @@
     <div style="display:flex;flex-direction:column;gap:10px;">
     {% for g in generation_history %}
         <div style="padding:14px 16px;border:1.2px solid var(--line);border-radius:7px;background:var(--surface-soft);">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:4px;">
                 <span style="font-size:12px;color:var(--muted);">{{ g.created_at }}</span>
-                {% if g.style %}<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--accent-soft);color:var(--accent);">{{ g.style }}</span>{% endif %}
+                <div style="display:flex;gap:6px;align-items:center;">
+                    {% if g.style %}<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--accent-soft);color:var(--accent);">{{ g.style }}</span>{% endif %}
+                    <button class="btn btn-secondary" style="padding:2px 10px;font-size:11px;" type="button" onclick="toggleHistoryMaterial({{ g.id }})">查看素材</button>
+                </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:4px;">
             {% for item in g._items %}
@@ -189,6 +192,10 @@
                     <span style="font-size:11px;color:var(--muted);margin-left:6px;">{{ item.formula or '自由创作' }}</span>
                 </div>
             {% endfor %}
+            </div>
+            <div id="hm-{{ g.id }}" style="display:none;margin-top:10px;padding-top:10px;border-top:1.2px solid var(--line);">
+                <div style="font-size:12px;color:var(--muted);margin-bottom:4px;">素材内容</div>
+                <div style="font-size:13px;padding:10px 12px;background:var(--surface-solid);border-radius:6px;line-height:1.6;white-space:pre-wrap;max-height:200px;overflow-y:auto;">{{ g.content or g.content_preview }}</div>
             </div>
         </div>
     {% endfor %}
@@ -339,6 +346,15 @@ function cancelHeadlineEdit(id) {
     if (!item) return;
     const form = item.querySelector('.hl-edit-form');
     form.style.display = 'none';
+}
+
+// ─── 生成记录：查看素材 ───
+
+function toggleHistoryMaterial(id) {
+    const el = document.getElementById('hm-' + id);
+    if (!el) return;
+    const isHidden = el.style.display === 'none';
+    el.style.display = isHidden ? 'block' : 'none';
 }
 
 // ─── 清空素材 ───

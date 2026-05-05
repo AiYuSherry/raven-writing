@@ -487,7 +487,7 @@ def create_app():
                     content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
                     content_preview = content.strip()[:100].replace("\n", " ")
                     result_json = json.dumps([{"headline": h, "formula": f} for h, f in result], ensure_ascii=False)
-                    HeadlineGenerationRepo.create(content_hash, content_preview, selected_style, result_json)
+                    HeadlineGenerationRepo.create(content_hash, content_preview, selected_style, result_json, content=content)
                 except Exception as e:
                     result = f"出错: {e}"
         headline_library = HeadlineLibraryRepo.list(selected_style or "", limit=30)
@@ -834,7 +834,7 @@ def create_app():
             content_hash = hashlib.md5(content.encode("utf-8")).hexdigest()
             content_preview = content[:100].replace("\n", " ")
             result_json = json.dumps([{"headline": h, "formula": f} for h, f in result], ensure_ascii=False)
-            HeadlineGenerationRepo.create(content_hash, content_preview, style, result_json)
+            HeadlineGenerationRepo.create(content_hash, content_preview, style, result_json, content=content)
             return jsonify({"status": "ok", "candidates": [{"headline": h, "formula": f} for h, f in result]})
         except Exception as e:
             return jsonify({"status": "error", "message": str(e)}), 500

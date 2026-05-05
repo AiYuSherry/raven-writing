@@ -619,11 +619,11 @@ class HeadlineGenerationRepo:
     """CRUD for headline_generation_history table."""
 
     @staticmethod
-    def create(content_hash, content_preview, style, result_json):
+    def create(content_hash, content_preview, style, result_json, content=""):
         conn = get_connection()
         cur = conn.execute(
-            "INSERT INTO headline_generation_history (content_hash, content_preview, style, result) VALUES (?, ?, ?, ?)",
-            (content_hash, content_preview, style, result_json),
+            "INSERT INTO headline_generation_history (content_hash, content_preview, content, style, result) VALUES (?, ?, ?, ?, ?)",
+            (content_hash, content_preview, content, style, result_json),
         )
         gen_id = cur.lastrowid
         conn.commit()
