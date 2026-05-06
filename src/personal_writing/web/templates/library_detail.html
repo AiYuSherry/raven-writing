@@ -1,0 +1,620 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# ─── Top Status Bar ─── #}
+<div class="lib-topbar">
+    <div class="lib-topbar-info">
+        <h1>{{ library.name }}</h1>
+        {% if library.topic %}<span class="meta">{{ library.topic }}</span>{% endif %}
+        {% if library.citation_style %}<span class="tag">{{ library.citation_style }}</span>{% endif %}
+        {% if library.strict_grounding %}<span class="tag">严格证据</span>{% endif %}
+    </div>
+    <div class="lib-topbar-actions">
+        <span class="stat-badge">{{ library_index.document_count }} 文档</span>
+        <span class="stat-badge ready">{{ library_index.searchable_document_count }} 可检索</span>
+        {% if library_index.chunk_count %}
+        <span class="stat-badge">{{ library_index.chunk_count }} 切片</span>
+        {% endif %}
+        <a class="btn btn-secondary" href="/libraries/{{ library.id }}/zotero/export.bib" style="font-size:13px;padding:5px 10px;">BibTeX</a>
+        <a class="btn btn-secondary" href="/libraries/{{ library.id }}/zotero/export.json" style="font-size:13px;padding:5px 10px;">CSL JSON</a>
+    </div>
+</div>
+
+{# ─── Library Switcher Bar ─── #}
+<div class="lib-switcher-bar">
+    <div class="lib-breadcrumb">
+        <a href="/libraries">素材库</a>
+        <span class="lib-sep">›</span>
+        <span class="lib-current-name">{{ library.name }}</span>
+    </div>
+    <div class="lib-switcher-actions">
+        <select class="lib-switcher-select" onchange="switchLibrary(this.value)">
+            {% for lib in all_libraries %}
+            <option value="{{ lib.id }}" {% if lib.id == library.id %}selected{% endif %}>{{ lib.name }}</option>
+            {% endfor %}
+        </select>
+        <a href="/libraries" class="new-lib-btn">+ 新建文献库</a>
+    </div>
+</div>
+
+{# ─── Messages ─── #}
+{% if message %}
+<div class="flash-error">{{ message }}</div>
+{% endif %}
+
+{# ─── Collapsible Import Area ─── #}
+<details class="lib-import-bar" {% if request.method == 'POST' and request.form.get('action') in ('upload','paste','zotero_import','zotero_pdf_import','create_folder') %}open{% endif %}>
+    <summary>导入材料与文献管理</summary>
+    <div class="lib-import-inner">
+        {# ── Folder management ── #}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+            <div>
+                <strong style="font-size:14px;">文件夹 / 分类</strong>
+                <div style="margin-top:8px;display:grid;gap:4px;">
+                    <a href="/libraries/{{ library.id }}"
+                       style="display:flex;align-items:center;justify-content:space-between;text-decoration:none;color:inherit;padding:6px 8px;border-radius:6px;background:{% if not folder_filter %}var(--accent-soft){% endif %};font-size:13px;">
+                        <span>全部资料</span>
+                        <span class="tag">{{ documents|length }}</span>
+                    </a>
+                    {% if folder_tree %}
+                        {% for f in folder_tree %}
+                        <a href="/libraries/{{ library.id }}?folder={{ f.id }}"
+                           style="display:flex;align-items:center;justify-content:space-between;text-decoration:none;color:inherit;padding:6px 8px;border-radius:6px;background:{% if folder_filter|string == f.id|string %}var(--accent-soft){% endif %};font-size:13px;">
+                            <span>{{ f.name }}</span>
+                            <span class="tag">{{ f.document_count or 0 }}</span>
+                        </a>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+                <form method="POST" style="display:grid;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+                    <input type="hidden" name="action" value="create_folder">
+                    <input type="text" name="name" placeholder="新建文件夹名称" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                    <div style="display:grid;grid-template-columns:1fr auto;gap:6px;">
+                        <select name="parent_id" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                            <option value="">无父级</option>
+                            {% for f in folders %}
+                            <option value="{{ f.id }}">{{ f.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <button class="btn btn-secondary" type="submit" style="font-size:13px;padding:7px 12px;">新建</button>
+                    </div>
+                </form>
+            </div>
+            <div>
+                <strong style="font-size:14px;">上传 / 粘贴材料</strong>
+                <form method="POST" enctype="multipart/form-data" style="display:grid;gap:6px;margin-top:8px;">
+                    <input type="hidden" name="action" value="upload">
+                    <select name="folder_id" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                        <option value="">放入：未分类</option>
+                        {% for f in folders %}
+                        <option value="{{ f.id }}">{{ f.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="file" name="files" multiple style="padding:7px;border:1.2px solid var(--line);border-radius:6px;background:var(--control);font-size:13px;">
+                    <div><button class="btn" type="submit" style="font-size:13px;padding:7px 14px;">上传并解析</button></div>
+                </form>
+                <form method="POST" style="display:grid;gap:6px;margin-top:8px;">
+                    <input type="hidden" name="action" value="paste">
+                    <select name="folder_id" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                        <option value="">放入：未分类</option>
+                        {% for f in folders %}
+                        <option value="{{ f.id }}">{{ f.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="text" name="title" placeholder="标题" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                    <textarea name="text" placeholder="粘贴文本、摘录或笔记..." style="min-height:80px;padding:9px;font-size:14px;"></textarea>
+                    <div><button class="btn btn-secondary" type="submit" style="font-size:13px;padding:7px 14px;">导入粘贴文本</button></div>
+                </form>
+            </div>
+        </div>
+
+        {# ── Zotero import ── #}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding-top:12px;border-top:1px solid var(--line);">
+            <form method="POST" enctype="multipart/form-data" style="display:grid;gap:6px;">
+                <input type="hidden" name="action" value="zotero_import">
+                <strong style="font-size:14px;">Zotero 文献导入 <span class="tag" style="font-size:11px;">BibTeX / CSL JSON / RIS</span></strong>
+                <select name="folder_id" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                    <option value="">放入：未分类</option>
+                    {% for f in folders %}
+                    <option value="{{ f.id }}">{{ f.name }}</option>
+                    {% endfor %}
+                </select>
+                <div style="display:grid;grid-template-columns:140px minmax(0,1fr);gap:6px;">
+                    <select name="zotero_format" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                        <option value="">自动识别</option>
+                        <option value="bibtex">BibTeX</option>
+                        <option value="csl-json">CSL JSON</option>
+                        <option value="ris">RIS</option>
+                    </select>
+                    <input type="file" name="zotero_file" accept=".bib,.json,.ris,.enw" style="padding:7px;border:1.2px solid var(--line);border-radius:6px;background:var(--control);font-size:13px;">
+                </div>
+                <textarea name="zotero_text" placeholder="或直接粘贴 BibTeX / CSL JSON / RIS..." style="min-height:80px;padding:9px;font-size:14px;"></textarea>
+                <div><button class="btn btn-secondary" type="submit" style="font-size:13px;padding:7px 14px;">导入文献</button></div>
+            </form>
+            <form method="POST" enctype="multipart/form-data" style="display:grid;gap:6px;">
+                <input type="hidden" name="action" value="zotero_pdf_import">
+                <strong style="font-size:14px;">导入 PDF 文献 <span class="tag" style="font-size:11px;">PDF → Zotero-style</span></strong>
+                <select name="folder_id" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                    <option value="">放入：未分类</option>
+                    {% for f in folders %}
+                    <option value="{{ f.id }}">{{ f.name }}</option>
+                    {% endfor %}
+                </select>
+                <input type="file" name="zotero_pdf_file" accept=".pdf,application/pdf" style="padding:7px;border:1.2px solid var(--line);border-radius:6px;background:var(--control);font-size:13px;">
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;">
+                    <input type="text" name="pdf_title" placeholder="题名（可选）" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                    <input type="text" name="pdf_authors" placeholder="作者（分号分隔）" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                    <input type="text" name="pdf_year" placeholder="年份" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                    <input type="text" name="pdf_journal" placeholder="期刊" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                    <input type="text" name="pdf_tags" placeholder="标签（逗号分隔）" style="padding:7px 9px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+                </div>
+                <div><button class="btn btn-secondary" type="submit" style="font-size:13px;padding:7px 14px;">导入 PDF</button></div>
+            </form>
+        </div>
+    </div>
+</details>
+
+{# ─── Zotero-style Workbench: Three Columns ─── #}
+<div class="lib-workbench">
+    {# ─── LEFT: Category folder tree ─── #}
+    <div class="lib-panel">
+        <div class="lib-panel-header">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-7l-2-2H4a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1Z"/></svg>
+            <span>文献分类</span>
+        </div>
+        <div class="lib-panel-body">
+            <div class="cat-tree" id="cat-tree">
+                <div class="cat-node active" data-cat="__all__" onclick="filterByCategory('__all__')">
+                    <svg class="folder-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-7l-2-2H4a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1Z"/></svg>
+                    <span class="cat-name">全部文档</span>
+                    <span class="cat-count">{{ category_tree[0].count if category_tree else 0 }}</span>
+                </div>
+                {% for cat in category_tree[1:] %}
+                <div class="cat-node" data-cat="{{ cat.key }}" onclick="filterByCategory('{{ cat.key }}')">
+                    <svg class="folder-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-7l-2-2H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1Z"/><path d="M4 14h16"/><path d="M4 17h10"/></svg>
+                    <span class="cat-name">{{ cat.name }}</span>
+                    <span class="cat-count">{{ cat.count }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            <details class="lib-filter-collapse" {% if zotero_filters.query or zotero_filters.author or zotero_filters.year or zotero_filters.journal or zotero_filters.tag %}open{% endif %}>
+                <summary>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-5-5"/></svg>
+                    筛选条件
+                </summary>
+                <form method="POST" class="filter-form" id="zotero-filter-form">
+                    <input type="hidden" name="action" value="zotero_search">
+                    <label>关键词</label>
+                    <input type="text" name="zotero_query" value="{{ zotero_filters.query }}" placeholder="题名/摘要/DOI">
+                    <label>作者</label>
+                    <input type="text" name="zotero_author" value="{{ zotero_filters.author }}" placeholder="作者姓名">
+                    <label>年份</label>
+                    <input type="text" name="zotero_year" value="{{ zotero_filters.year }}" placeholder="2024">
+                    <label>期刊</label>
+                    <input type="text" name="zotero_journal" value="{{ zotero_filters.journal }}" placeholder="期刊/出版物">
+                    <label>标签</label>
+                    <input type="text" name="zotero_tag" value="{{ zotero_filters.tag }}" placeholder="标签关键词">
+                    <button class="filter-btn" type="submit">筛选文献</button>
+                </form>
+            </details>
+        </div>
+    </div>
+
+    {# ─── CENTER: Literature list ─── #}
+    <div class="lib-panel">
+        {% set refs = classified_refs if classified_refs else (zotero_results if zotero_results else zotero_recent) %}
+        <div class="ref-list-header">
+            <label><input type="checkbox" id="select-all-docs" onchange="toggleSelectAll(this)"> <span>全选</span></label>
+            <span style="font-size:12px;color:var(--muted);">{{ ((refs|length if refs else 0) + (classified_docs|length if classified_docs else 0)) }} 篇文献</span>
+        </div>
+        <div class="ref-list" id="ref-list">
+            {% if (refs and refs|length > 0) or (classified_docs and classified_docs|length > 0) %}
+                {# ── Zotero refs (unchanged rendering) ── #}
+                {% if refs %}
+                {% for ref in refs %}
+                {% set doc_id = ref.document_id %}
+                {% set categories_attr = ref.categories|join(',') if ref.categories else '' %}
+                <div class="ref-row" data-doc-id="{{ doc_id }}" data-categories="{{ categories_attr }}" onclick="selectRef(this, {{ doc_id }})">
+                    <label class="ref-check" onclick="event.stopPropagation();">
+                        <input type="checkbox" class="doc-check" value="{{ doc_id }}" onchange="updateSelectAll()">
+                    </label>
+                    <div class="ref-main">
+                        <a href="/libraries/{{ library.id }}/documents/{{ doc_id }}"
+                           onclick="event.stopPropagation();"
+                           style="text-decoration:none;color:inherit;">
+                            <div class="ref-title">{{ ref.title }}</div>
+                        </a>
+                        <div class="ref-meta">{{ ref.authors|join('；') or '佚名' }} · {{ ref.year or 'n.d.' }} · {{ ref.publicationTitle or '未填期刊' }}</div>
+                        <div class="ref-tags">
+                            {% for tag in ref.tags[:5] %}<span class="tag">{{ tag }}</span>{% endfor %}
+                            {% if ref.DOI %}<span class="status-tag">DOI</span>{% endif %}
+                            {% if ref.attachment_path %}<span class="status-tag pdf">PDF</span>{% endif %}
+                            {% if ref.parse_status == 'ready' %}<span class="status-tag ready">已索引</span>{% elif ref.parse_status == 'failed' %}<span class="status-tag" style="color:var(--danger-text);background:var(--danger-bg);">解析失败</span>{% endif %}
+                        </div>
+                    </div>
+                    <div class="ref-status">
+                        <span style="font-size:11px;color:var(--muted);">#{{ doc_id }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+                {% endif %}
+
+                {# ── Regular library documents (classified, filterable) ── #}
+                {% if classified_docs %}
+                {% for doc in classified_docs %}
+                {% set doc_id = doc.id %}
+                {% set categories_attr = doc.categories|join(',') if doc.categories else '' %}
+                <div class="ref-row" data-doc-id="{{ doc_id }}" data-categories="{{ categories_attr }}" onclick="selectRef(this, {{ doc_id }})">
+                    <label class="ref-check" onclick="event.stopPropagation();">
+                        <input type="checkbox" class="doc-check" value="{{ doc_id }}" onchange="updateSelectAll()">
+                    </label>
+                    <div class="ref-main">
+                        <a href="/libraries/{{ library.id }}/documents/{{ doc_id }}"
+                           onclick="event.stopPropagation();"
+                           style="text-decoration:none;color:inherit;">
+                            <div class="ref-title">{{ doc.title or doc.original_filename or ('文档 #' ~ doc.id) }}</div>
+                        </a>
+                        <div class="ref-meta">{{ doc.source_type }} · {{ doc.word_count or 0 }} 字{% if doc.folder_name %} · {{ doc.folder_name }}{% endif %}</div>
+                        <div class="ref-tags">
+                            {% if doc.tags %}
+                                {% for tag in doc.tags[:5] %}<span class="tag">{{ tag }}</span>{% endfor %}
+                            {% endif %}
+                            {% if doc.parse_status == 'ready' %}<span class="status-tag ready">已索引</span>{% elif doc.parse_status == 'failed' %}<span class="status-tag" style="color:var(--danger-text);background:var(--danger-bg);">解析失败</span>{% endif %}
+                        </div>
+                    </div>
+                    <div class="ref-status">
+                        <span style="font-size:11px;color:var(--muted);">#{{ doc_id }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+                {% endif %}
+            {% else %}
+                <div class="ref-empty">
+                    {% if zotero_results is defined and zotero_results %}
+                    未找到匹配条件的文献，试试调整筛选。
+                    {% else %}
+                    还没有资料。<br>请通过上方「导入材料与文献管理」导入文献或上传资料。
+                    {% endif %}
+                </div>
+            {% endif %}
+        </div>
+        {% if refs %}
+        <div style="padding:8px 14px;border-top:1px solid var(--line);display:flex;gap:6px;flex-wrap:wrap;">
+            <button class="detail-btn primary" id="gen-refpack-btn" onclick="generateReferencePack()" style="font-size:12px;">生成 AI 参考包</button>
+            <button class="detail-btn" onclick="copySelectedSnippets()" style="font-size:12px;">复制引用素材</button>
+        </div>
+        {% endif %}
+    </div>
+
+    {# ─── RIGHT: Detail / AI Reference Pack Panel ─── #}
+    <div class="lib-panel detail-panel" id="detail-panel">
+        <div class="detail-placeholder" id="detail-placeholder">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5V5a2 2 0 0 1 2-2h11"/><path d="M8 7h11a1 1 0 0 1 1 1v12H8a4 4 0 0 1-4-4V7a4 4 0 0 0 4 4Z"/></svg>
+            <p>点击左侧文献标题或行<br>查看详情与引用素材</p>
+        </div>
+        <div class="detail-content" id="detail-content" style="display:none;"></div>
+    </div>
+</div>
+
+{# ─── Hidden snippet textarea (for copy) ─── #}
+{% if zotero_snippet %}
+<textarea id="hidden-snippet" style="position:fixed;left:-9999px;top:0;">{{ zotero_snippet }}</textarea>
+{% endif %}
+
+{# ─── Bottom: Search Test & Documents ─── #}
+<div class="card" style="padding:18px;">
+    <h2 style="font-size:18px;margin-bottom:10px;">检索测试</h2>
+    <form method="POST" style="display:grid;grid-template-columns:minmax(0,1fr) 160px auto;gap:8px;align-items:center;margin-bottom:10px;">
+        <input type="hidden" name="action" value="search">
+        <input type="text" name="query" value="{{ search_query or '' }}" placeholder="输入检索问题"
+               style="padding:8px 10px;border:1.2px solid var(--line);border-radius:6px;font-size:14px;">
+        <select name="folder_id" style="padding:8px 10px;border:1.2px solid var(--line);border-radius:6px;font-size:13px;">
+            <option value="">全库</option>
+            {% for f in folders %}
+            <option value="{{ f.id }}">{{ f.name }}</option>
+            {% endfor %}
+        </select>
+        <button class="btn btn-secondary" type="submit" style="font-size:13px;padding:8px 14px;">检索</button>
+    </form>
+    {% for item in search_results %}
+    <div style="padding:10px 0;border-top:1px solid var(--line);">
+        <div style="font-weight:600;font-size:14px;">[{{ item.label }}] 《{{ item.document_title }}》 {{ item.locator }}</div>
+        <div style="font-size:12px;color:var(--muted);">
+            document_id={{ item.document_id }} · chunk_id={{ item.chunk_id }} · {{ item.library_name }} · score {{ '%.2f'|format(item.score) }}
+        </div>
+        <div style="font-size:13px;line-height:1.7;margin-top:4px;">{{ item.excerpt or item.snippet }}</div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="card" style="padding:18px;">
+    <h2 style="font-size:18px;margin-bottom:10px;">全部文档{% if folder_filter %} · {{ selected_folder.name if selected_folder else '未分类' }}{% endif %}</h2>
+    {% if documents %}
+    <div style="display:grid;gap:6px;max-height:calc(100vh - 340px);overflow-y:auto;">
+        {% for doc in documents %}
+        <a href="/libraries/{{ library.id }}/documents/{{ doc.id }}" style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;text-decoration:none;color:inherit;padding:10px 12px;border:1.2px solid var(--line);border-radius:6px;background:var(--surface-solid);">
+            <span>
+                <strong style="font-size:14px;">{{ doc.title or doc.original_filename or ('文档 #' ~ doc.id) }}</strong>
+                <span style="display:block;color:var(--muted);font-size:12px;">{{ doc.folder_name or '未分类' }} · {{ doc.source_type }} · {{ doc.word_count or 0 }} 字</span>
+                {% if doc.parse_error %}<span style="display:block;color:var(--danger-text);font-size:12px;">{{ doc.parse_error }}</span>{% endif %}
+            </span>
+            <span class="tag" style="align-self:center;">{{ doc.parse_status }}</span>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty" style="padding:20px;font-size:14px;">当前分类还没有资料。</div>
+    {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Select / Deselect ──
+function toggleSelectAll(master) {
+    document.querySelectorAll('.doc-check').forEach(cb => cb.checked = master.checked);
+}
+
+function updateSelectAll() {
+    const all = document.querySelectorAll('.doc-check');
+    const checked = document.querySelectorAll('.doc-check:checked');
+    const master = document.getElementById('select-all-docs');
+    if (master) master.checked = all.length > 0 && all.length === checked.length;
+}
+
+// ── Row selection (detail panel) ──
+let currentDocId = null;
+
+function selectRef(row, docId) {
+    document.querySelectorAll('.ref-row').forEach(r => r.classList.remove('selected'));
+    row.classList.add('selected');
+    currentDocId = docId;
+    loadDocDetail(docId);
+}
+
+function loadDocDetail(docId) {
+    const placeholder = document.getElementById('detail-placeholder');
+    const content = document.getElementById('detail-content');
+    placeholder.style.display = 'none';
+    content.style.display = 'grid';
+    content.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px;">加载中...</div>';
+
+    fetch('/api/v1/zotero/references/' + docId + '/snippet')
+        .then(r => r.json())
+        .then(d => {
+            if (d.status === 'ok') {
+                const ref = d.reference || {};
+                const snippet = d.snippet || '';
+                content.innerHTML = renderDetail(ref, snippet);
+            } else {
+                content.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px;">无法加载文献详情</div>';
+            }
+        })
+        .catch(() => {
+            // Fallback: show basic info from the row
+            const row = document.querySelector('.ref-row[data-doc-id="' + docId + '"]');
+            if (row) {
+                const title = row.querySelector('.ref-title')?.textContent || '';
+                const meta = row.querySelector('.ref-meta')?.textContent || '';
+                content.innerHTML = renderDetailFallback(docId, title, meta);
+            }
+        });
+}
+
+function renderDetail(ref, snippet) {
+    const title = escapeHtml(ref.title || '');
+    const authors = escapeHtml((ref.authors || []).join('；'));
+    const year = escapeHtml(ref.year || 'n.d.');
+    const journal = escapeHtml(ref.publicationTitle || '');
+    const doi = escapeHtml(ref.DOI || '');
+    const abstract = escapeHtml(ref.abstract || '');
+    const notes = escapeHtml(ref.notes || '');
+    const citation = escapeHtml(ref.citation || ref.chinese_citation || '');
+    const docId = ref.document_id || '';
+
+    let html = '<div class="detail-section">';
+    html += '<div class="detail-section-title">题名</div>';
+    html += '<div class="detail-section-body" style="font-weight:650;">' + title + '</div>';
+    html += '</div>';
+
+    if (authors || year || journal) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-section-title">作者 · 年份 · 期刊</div>';
+        html += '<div class="detail-section-body">';
+        const parts = [];
+        if (authors) parts.push(authors);
+        parts.push(year);
+        if (journal) parts.push(journal);
+        html += escapeHtml(parts.join(' · '));
+        html += '</div></div>';
+    }
+
+    if (doi) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-section-title">DOI</div>';
+        html += '<div class="detail-section-body" style="word-break:break-all;font-size:12px;">' + doi + '</div>';
+        html += '</div>';
+    }
+
+    if (abstract) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-section-title">摘要</div>';
+        html += '<div class="detail-abstract">' + abstract + '</div>';
+        html += '</div>';
+    }
+
+    if (notes) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-section-title">笔记</div>';
+        html += '<div class="detail-section-body">' + notes.slice(0, 500) + '</div>';
+        html += '</div>';
+    }
+
+    if (snippet) {
+        html += '<div class="detail-section">';
+        html += '<div class="detail-section-title">可复制引用素材</div>';
+        html += '<div class="detail-snippet" id="detail-snippet-text">' + escapeHtml(snippet) + '</div>';
+        html += '</div>';
+    }
+
+    // Actions
+    html += '<div class="detail-actions">';
+    html += '<a href="/libraries/' + libraryId + '/documents/' + docId + '" class="detail-btn" style="text-decoration:none;">完整详情</a>';
+    if (snippet) {
+        html += '<button class="detail-btn" onclick="copyDetailSnippet()">复制素材</button>';
+    }
+    html += '<button class="detail-btn" onclick="addDocToPack(' + docId + ')">加入参考包</button>';
+    html += '</div>';
+
+    return html;
+}
+
+function renderDetailFallback(docId, title, meta) {
+    let html = '<div class="detail-section">';
+    html += '<div class="detail-section-title">文献</div>';
+    html += '<div class="detail-section-body" style="font-weight:650;">' + escapeHtml(title) + '</div>';
+    html += '</div>';
+    html += '<div class="detail-section">';
+    html += '<div class="detail-section-title">元数据</div>';
+    html += '<div class="detail-section-body">' + escapeHtml(meta) + '</div>';
+    html += '</div>';
+    html += '<div class="detail-actions">';
+    html += '<a href="/libraries/' + libraryId + '/documents/' + docId + '" class="detail-btn" style="text-decoration:none;">查看完整详情</a>';
+    html += '<button class="detail-btn" onclick="addDocToPack(' + docId + ')">加入参考包</button>';
+    html += '</div>';
+    return html;
+}
+
+function copyDetailSnippet() {
+    const el = document.getElementById('detail-snippet-text');
+    if (el) {
+        navigator.clipboard.writeText(el.textContent).catch(() => {});
+    }
+}
+
+// ── Reference Pack ──
+const selectedDocIds = new Set();
+
+function generateReferencePack() {
+    const checked = document.querySelectorAll('.doc-check:checked');
+    const ids = Array.from(checked).map(cb => parseInt(cb.value));
+    if (ids.length === 0) {
+        if (currentDocId) ids.push(currentDocId);
+    }
+    if (ids.length === 0) {
+        alert('请先勾选文献或点击一篇文献。');
+        return;
+    }
+
+    const placeholder = document.getElementById('detail-placeholder');
+    const content = document.getElementById('detail-content');
+    placeholder.style.display = 'none';
+    content.style.display = 'grid';
+    content.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px;">正在生成参考包...</div>';
+
+    // Fetch snippets for all selected docs
+    Promise.all(ids.map(id =>
+        fetch('/api/v1/zotero/references/' + id + '/snippet')
+            .then(r => r.json())
+            .then(d => d.status === 'ok' ? d.snippet : null)
+            .catch(() => null)
+    )).then(snippets => {
+        const valid = snippets.filter(s => s);
+        if (valid.length === 0) {
+            content.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px;">未能获取引用素材。</div>';
+            return;
+        }
+        let html = '<div class="detail-section">';
+        html += '<div class="detail-section-title">AI 参考包 · ' + valid.length + ' 篇文献</div>';
+        html += '<div class="detail-snippet" id="refpack-text" style="max-height:400px;">';
+        html += escapeHtml(valid.join('\n\n---\n\n'));
+        html += '</div></div>';
+        html += '<div class="detail-actions">';
+        html += '<button class="detail-btn primary" onclick="copyRefPack()">复制全部</button>';
+        html += '</div>';
+        content.innerHTML = html;
+    });
+}
+
+function copyRefPack() {
+    const el = document.getElementById('refpack-text');
+    if (el) {
+        navigator.clipboard.writeText(el.textContent).catch(() => {});
+    }
+}
+
+function copySelectedSnippets() {
+    const checked = document.querySelectorAll('.doc-check:checked');
+    const ids = Array.from(checked).map(cb => parseInt(cb.value));
+    if (ids.length === 0 && currentDocId) ids.push(currentDocId);
+    if (ids.length === 0) return;
+
+    Promise.all(ids.map(id =>
+        fetch('/api/v1/zotero/references/' + id + '/snippet')
+            .then(r => r.json())
+            .then(d => d.status === 'ok' ? d.snippet : null)
+            .catch(() => null)
+    )).then(snippets => {
+        const text = snippets.filter(s => s).join('\n\n---\n\n');
+        if (text) {
+            navigator.clipboard.writeText(text).catch(() => {});
+        }
+    });
+}
+
+function addDocToPack(docId) {
+    // Check the checkbox if not already checked
+    const cb = document.querySelector('.doc-check[value="' + docId + '"]');
+    if (cb) { cb.checked = true; updateSelectAll(); }
+}
+
+// ── Category Tree Filtering ──
+let activeCategory = '__all__';
+
+function filterByCategory(catKey) {
+    activeCategory = catKey;
+
+    // Update active state in the tree
+    document.querySelectorAll('.cat-node').forEach(function(n) { n.classList.remove('active'); });
+    var node = document.querySelector('.cat-node[data-cat="' + catKey + '"]');
+    if (node) node.classList.add('active');
+
+    // Filter ref rows
+    var rows = document.querySelectorAll('.ref-row');
+    var visibleCount = 0;
+    rows.forEach(function(row) {
+        if (catKey === '__all__') {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            var cats = (row.dataset.categories || '').split(',');
+            if (cats.indexOf(catKey) !== -1) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
+        }
+    });
+
+    // Update count display
+    var countEl = document.querySelector('.ref-list-header span:last-child');
+    if (countEl) countEl.textContent = visibleCount + ' 篇文献';
+}
+
+// ── Utility ──
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// ── Library Switcher ──
+function switchLibrary(libraryId) {
+    window.location.href = '/libraries/' + libraryId;
+}
+
+const libraryId = {{ library.id }};
+</script>
+{% endblock %}

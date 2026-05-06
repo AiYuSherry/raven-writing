@@ -9,21 +9,46 @@ import re
 import uuid
 import hashlib
 import difflib
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for
 
-from ..core import pipeline
-from ..core.input_reader import read_spreadsheet, read_epub
-from ..core.pipeline import _clean_output, _format_rules_for_style, _strip_daily_headings, _repair_hard_constraint_violations, _hard_enforce_output, _violates_hard_constraints, looks_like_edit_report, DAILY_FINAL_GUARDRAILS, STRICT_OUTPUT_RULES, HARD_CONSTRAINT_REPAIR_RULES, _sanitize_style_prompt_template
+from ..core import pipeline, nuwa_distiller
+from ..core.citation_verifier import verify_citations, format_report as format_citation_report
+from ..core.citation_formatter import format_article_footnotes
+from ..core.input_reader import read_spreadsheet
+from ..core.pipeline import _clean_output, _format_rules_for_style, _strip_daily_headings, looks_like_edit_report, DAILY_FINAL_GUARDRAILS, STRICT_ARTICLE_OUTPUT_RULES
 from ..core.style_engine import registry as style_registry
 from ..core.obsidian_bridge import archive_to_works
-from ..db.repository import MaterialRepo, SessionRepo, ArticleRepo, HeadlineFeedbackRepo, HeadlineLibraryRepo, HeadlineAnalysisRepo, HeadlineFormulaRepo, CommonPhraseRepo, StyleRepo, StyleExampleRepo, StatsRepo, ReviewAnalysisRepo, HeadlineGenerationRepo
+from ..db.repository import MaterialRepo, SessionRepo, ArticleRepo, HeadlineFeedbackRepo, HeadlineLibraryRepo, HeadlineAnalysisRepo, HeadlineFormulaRepo, CommonPhraseRepo, StyleRepo, StyleExampleRepo, StatsRepo, ReviewAnalysisRepo, HeadlineGenerationRepo, MaterialLibraryRepo, MaterialFolderRepo, LibraryDocumentRepo, DocumentChunkRepo
 from ..db.schema import get_connection
+from ..material_library import storage
+from ..material_library.chunker import chunk_document
+from ..material_library.classification import (
+    build_category_tree,
+    classify_refs,
+    get_rules_json,
+)
+from ..material_library.context_builder import build_evidence_pack
+from ..material_library.extractors import extract, extract_text
+from ..material_library.indexing import build_library_index_summary, build_source_guide
+from ..zotero_library import (
+    build_reference_pack,
+    build_writing_snippet,
+    detect_format,
+    export_references,
+    format_citation,
+    get_reference,
+    import_pdf_bytes,
+    import_references,
+    parse_references,
+    search_references as search_zotero_references,
+)
 from ..utils.text_stats import count_text_units
 from ..utils import claude_client
 from ..utils.claude_client import call as claude_call
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
-UPLOAD_DIR = os.path.expanduser("~/Desktop/计算机/个人写作/data/uploads")
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+UPLOAD_DIR = os.path.join(_PROJECT_ROOT, "data", "uploads")
 OBSIDIAN_VAULT = os.path.expanduser("~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Obsidian Vault")
 
 
@@ -49,68 +74,6 @@ def _extract_title(raw_content):
     return ""
 
 
-def _normalize_for_diff(text):
-    """Normalize article text for rough equality checks."""
-    if not text:
-        return ""
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"\s+", "", text)
-    return text.strip()
-
-
-def _looks_effectively_unchanged(before, after):
-    """Treat near-identical rewrite output as a failed modification."""
-    before_norm = _normalize_for_diff(before)
-    after_norm = _normalize_for_diff(after)
-    if not before_norm or not after_norm:
-        return False
-    if before_norm == after_norm:
-        return True
-    ratio = difflib.SequenceMatcher(None, before_norm, after_norm).ratio()
-    return ratio >= 0.985
-
-
-def _split_sentences(text):
-    if not text:
-        return []
-    parts = re.split(r"(?<=[。！？!?])\s*", text.replace("\r\n", "\n").replace("\r", "\n"))
-    return [p.strip() for p in parts if p and p.strip()]
-
-
-def _summarize_rewrite_changes(before, after, max_items=4):
-    """Return a short user-facing summary of concrete rewrite changes."""
-    before_sentences = _split_sentences(before)
-    after_sentences = _split_sentences(after)
-    if not before_sentences or not after_sentences:
-        return []
-
-    matcher = difflib.SequenceMatcher(a=before_sentences, b=after_sentences)
-    items = []
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "equal":
-            continue
-        before_chunk = "".join(before_sentences[i1:i2]).strip()
-        after_chunk = "".join(after_sentences[j1:j2]).strip()
-        if tag == "replace" and before_chunk and after_chunk:
-            items.append(f"把\u201c{before_chunk[:36]}\u201d改成了\u201c{after_chunk[:36]}\u201d")
-        elif tag == "delete" and before_chunk:
-            items.append(f"删掉了\u201c{before_chunk[:36]}\u201d")
-        elif tag == "insert" and after_chunk:
-            items.append(f"新增了\u201c{after_chunk[:36]}\u201d")
-        if len(items) >= max_items:
-            break
-    return items
-
-
-def _flush_section(section_name, buffer, patterns_list, takeaways_list):
-    """Flush a parsed section buffer into the appropriate output list."""
-    text = "\n".join(buffer).strip()
-    if not text:
-        return
-    if section_name == "patterns":
-        patterns_list.append(text)
-
-
 def _safe_image_name(name):
     base = os.path.basename(name or "pasted-image.png")
     base = re.sub(r"[^A-Za-z0-9._\-\u4e00-\u9fff]+", "_", base).strip("._")
@@ -125,6 +88,41 @@ def _safe_upload_name(name, fallback="uploaded-file"):
     base = os.path.basename(name or fallback)
     base = re.sub(r"[^A-Za-z0-9._\-\u4e00-\u9fff]+", "_", base).strip("._")
     return base or fallback
+
+
+def _source_type_for_name(name):
+    ext = os.path.splitext(name or "")[1].lower().lstrip(".")
+    if ext in {"txt", "md", "html", "htm", "csv", "xlsx", "xlsm", "docx", "pdf"}:
+        return "html" if ext == "htm" else ext
+    return ext or "paste"
+
+
+def _process_library_document(document_id, extracted=None):
+    """Parse, chunk, index, and mark a library document."""
+    doc = LibraryDocumentRepo.get(document_id)
+    if not doc:
+        raise ValueError("文档不存在")
+    try:
+        LibraryDocumentRepo.update_parse_result(document_id, "processing")
+        if extracted is None:
+            extracted = extract(doc["file_path"], doc.get("source_type"))
+        chunks = chunk_document(extracted)
+        DocumentChunkRepo.replace_for_document(document_id, doc["library_id"], chunks)
+        preview = (extracted.text or "").strip()[:1200]
+        title = doc.get("title") or extracted.title or doc.get("original_filename")
+        LibraryDocumentRepo.update_parse_result(
+            document_id,
+            "ready",
+            page_count=len(extracted.pages or []),
+            word_count=len(extracted.text or ""),
+            text_preview=preview,
+            parse_error="",
+            title=title,
+        )
+        return {"status": "ready", "chunks": len(chunks)}
+    except Exception as e:
+        LibraryDocumentRepo.update_parse_result(document_id, "failed", parse_error=str(e))
+        return {"status": "failed", "error": str(e)}
 
 
 def _save_image_payloads(payloads):
@@ -182,8 +180,6 @@ def _extract_file_payloads(payloads):
 
             if ext in {".xlsx", ".xlsm", ".xls", ".csv"}:
                 content, _ = read_spreadsheet(path)
-            elif ext == ".epub":
-                content, _ = read_epub(path)
             elif ext in {".txt", ".md", ".json", ".yml", ".yaml", ".csv", ".log"}:
                 content = raw.decode("utf-8-sig", errors="replace")
             else:
@@ -301,12 +297,23 @@ def create_app():
     @app.route("/", methods=["GET", "POST"])
     def write_page():
         styles = style_registry.list_info()
+        libraries = MaterialLibraryRepo.list(limit=100)
         results = None
         content = ""
         selected = []
+        selected_libraries = []
+        selected_folder_id = ""
+        retrieval_query = ""
+        library_mode = "material_first"
         preselect = request.args.get("preselect", "")
         if preselect:
             selected.append(preselect)
+        library_folder_options = []
+        for lib in libraries:
+            for folder in MaterialFolderRepo.list_by_library(lib["id"]):
+                item = dict(folder)
+                item["library_name"] = lib["name"]
+                library_folder_options.append(item)
 
         if request.method == "POST":
             content = request.form.get("content", "")
@@ -320,7 +327,18 @@ def create_app():
             except Exception:
                 file_payloads = []
             file_path = request.form.get("file_path", "").strip()
-            generation_mode = "fast"
+            generation_mode = request.form.get("generation_mode", "fast").strip()
+            if generation_mode not in ("fast", "thinking"):
+                generation_mode = "fast"
+            selected_libraries = [int(x) for x in request.form.getlist("library_ids") if str(x).strip()]
+            selected_folder_id = request.form.get("library_folder_id", "").strip()
+            retrieval_query = request.form.get("retrieval_query", "").strip()
+            strict_grounding = request.form.get("strict_grounding") == "1"
+            library_mode = request.form.get("library_mode", "material_first").strip()
+            if strict_grounding:
+                library_mode = "strict"
+            if library_mode not in {"strict", "material_first", "search_only"}:
+                library_mode = "material_first"
             styles_str = request.form.get("styles", "")
             selected = [s.strip() for s in styles_str.split(",") if s.strip()]
             generation_parts = []
@@ -346,12 +364,32 @@ def create_app():
             generation_content = _prepare_multimodal_markdown(generation_content, image_payloads)
             if generation_content.strip():
                 try:
-                    result = pipeline.write(generation_content, selected, generation_mode=generation_mode)
+                    result = pipeline.write(
+                        generation_content,
+                        selected,
+                        generation_mode=generation_mode,
+                        library_ids=selected_libraries,
+                        folder_id=selected_folder_id,
+                        retrieval_query=retrieval_query,
+                        library_mode=library_mode,
+                    )
                     results = result["articles"]
                 except Exception as e:
                     results = [{"style": "error", "error": str(e), "title": "", "content": ""}]
 
-        return render_template("write.html", styles=styles, selected=selected, content=content, results=results)
+        return render_template(
+            "write.html",
+            styles=styles,
+            selected=selected,
+            content=content,
+            results=results,
+            libraries=libraries,
+            selected_libraries=selected_libraries,
+            selected_folder_id=selected_folder_id,
+            retrieval_query=retrieval_query,
+            library_mode=library_mode,
+            library_folder_options=library_folder_options,
+        )
 
     @app.route("/history")
     def history_page():
@@ -411,6 +449,260 @@ def create_app():
             articles_by_session[s["id"]] = ArticleRepo.list_by_session(s["id"])
         return render_template("material_detail.html", material=m, title=title, sessions=sessions, articles_by_session=articles_by_session)
 
+    @app.route("/libraries", methods=["GET", "POST"])
+    def libraries_page():
+        if request.method == "POST":
+            name = request.form.get("name", "").strip()
+            if not name:
+                return "素材库名称不能为空", 400
+            library_id = MaterialLibraryRepo.create(
+                name=name,
+                description=request.form.get("description", "").strip(),
+                topic=request.form.get("topic", "").strip(),
+                discipline=request.form.get("discipline", "").strip(),
+                strict_grounding=1 if request.form.get("strict_grounding") == "1" else 0,
+            )
+            return redirect(url_for("library_detail_page", library_id=library_id))
+        libraries = MaterialLibraryRepo.list(limit=100)
+        return render_template("libraries.html", libraries=libraries)
+
+    @app.route("/libraries/<int:library_id>", methods=["GET", "POST"])
+    def library_detail_page(library_id):
+        library = MaterialLibraryRepo.get(library_id)
+        if not library:
+            return "素材库未找到", 404
+        search_query = ""
+        search_results = []
+        zotero_results = []
+        zotero_filters = {"query": "", "author": "", "year": "", "tag": "", "journal": ""}
+        zotero_snippet = ""
+        message = ""
+        folder_filter = request.args.get("folder", "").strip()
+        selected_folder = None
+        if folder_filter and folder_filter != "uncategorized":
+            try:
+                selected_folder = MaterialFolderRepo.get(int(folder_filter))
+                if not selected_folder or selected_folder["library_id"] != library_id:
+                    selected_folder = None
+                    folder_filter = ""
+            except Exception:
+                selected_folder = None
+                folder_filter = ""
+        if request.method == "POST":
+            action = request.form.get("action", "")
+            if action == "search":
+                search_query = request.form.get("query", "").strip()
+                folder_filter = request.form.get("folder_id", folder_filter).strip()
+                folder_name = "未分类" if folder_filter == "uncategorized" else ""
+                if folder_filter and folder_filter != "uncategorized":
+                    folder = MaterialFolderRepo.get(int(folder_filter))
+                    if folder and folder["library_id"] == library_id:
+                        folder_name = folder["name"]
+                    else:
+                        folder_filter = ""
+                if search_query:
+                    search_results = build_evidence_pack(
+                        [library_id],
+                        search_query,
+                        mode="material_first",
+                        top_k=8,
+                        folder_id=folder_filter or None,
+                        folder_name=folder_name,
+                    )["results"]
+            elif action == "create_folder":
+                name = request.form.get("name", "").strip()
+                parent_id = request.form.get("parent_id", "").strip()
+                description = request.form.get("description", "").strip()
+                if not name:
+                    message = "文件夹名称不能为空。"
+                else:
+                    MaterialFolderRepo.create(
+                        library_id=library_id,
+                        name=name,
+                        parent_id=parent_id,
+                        description=description,
+                    )
+                    return redirect(url_for("library_detail_page", library_id=library_id))
+            elif action == "paste":
+                title = request.form.get("title", "").strip() or "粘贴材料"
+                text = request.form.get("text", "").strip()
+                folder_id = request.form.get("folder_id", "").strip()
+                if not text:
+                    message = "粘贴文本不能为空。"
+                else:
+                    saved = storage.save_text(library_id, title, text)
+                    doc_id = LibraryDocumentRepo.create(
+                        library_id=library_id,
+                        title=title,
+                        original_filename=saved["filename"],
+                        file_path=saved["path"],
+                        source_type="paste",
+                        sha256=saved["sha256"],
+                        folder_id=folder_id,
+                    )
+                    result = _process_library_document(doc_id, extracted=extract_text(title, text))
+                    message = "已导入并切片。" if result["status"] == "ready" else f"解析失败：{result.get('error', '')}"
+                    return redirect(url_for("library_detail_page", library_id=library_id))
+            elif action == "upload":
+                files = [f for f in request.files.getlist("files") if f and f.filename]
+                folder_id = request.form.get("folder_id", "").strip()
+                if not files:
+                    message = "请选择要上传的文件。"
+                for file in files:
+                    raw = file.read()
+                    saved = storage.save_bytes(library_id, file.filename, raw)
+                    source_type = _source_type_for_name(file.filename)
+                    doc_id = LibraryDocumentRepo.create(
+                        library_id=library_id,
+                        title=os.path.basename(file.filename),
+                        original_filename=file.filename,
+                        file_path=saved["path"],
+                        source_type=source_type,
+                        mime_type=file.mimetype or "",
+                        sha256=saved["sha256"],
+                        folder_id=folder_id,
+                    )
+                    result = _process_library_document(doc_id)
+                    if result["status"] != "ready":
+                        message = f"{file.filename} 解析失败：{result.get('error', '')}"
+                if not message:
+                    return redirect(url_for("library_detail_page", library_id=library_id))
+            elif action == "zotero_import":
+                fmt = request.form.get("zotero_format", "").strip()
+                folder_id = request.form.get("folder_id", "").strip()
+                pasted = request.form.get("zotero_text", "").strip()
+                upload = request.files.get("zotero_file")
+                if upload and upload.filename:
+                    raw = upload.read()
+                    pasted = raw.decode("utf-8-sig", errors="replace")
+                    fmt = fmt or detect_format(upload.filename, pasted)
+                else:
+                    fmt = fmt or detect_format(text=pasted)
+                if not pasted:
+                    message = "请上传或粘贴 BibTeX / CSL JSON / RIS。"
+                else:
+                    try:
+                        refs = parse_references(pasted, fmt)
+                        imported = import_references(
+                            library_id,
+                            refs,
+                            folder_id=folder_id,
+                            import_source=f"Zotero {fmt or 'export'}",
+                        )
+                        message = f"已导入 {len(imported)} 条 Zotero-style 文献。"
+                    except Exception as e:
+                        message = f"Zotero 导入失败：{e}"
+            elif action == "zotero_pdf_import":
+                folder_id = request.form.get("folder_id", "").strip()
+                upload = request.files.get("zotero_pdf_file")
+                if not upload or not upload.filename:
+                    message = "请选择要导入的 PDF。"
+                elif not upload.filename.lower().endswith(".pdf"):
+                    message = "Zotero-style PDF 导入只接受 .pdf 文件。"
+                else:
+                    try:
+                        imported = import_pdf_bytes(
+                            library_id,
+                            upload.filename,
+                            upload.read(),
+                            folder_id=folder_id,
+                            metadata={
+                                "title": request.form.get("pdf_title", "").strip(),
+                                "authors": request.form.get("pdf_authors", "").strip(),
+                                "year": request.form.get("pdf_year", "").strip(),
+                                "journal": request.form.get("pdf_journal", "").strip(),
+                                "tags": request.form.get("pdf_tags", "").strip(),
+                            },
+                        )
+                        message = f"已导入 PDF 文献：{imported['title']}。"
+                    except Exception as e:
+                        message = str(e)
+            elif action == "zotero_search":
+                zotero_filters = {
+                    "query": request.form.get("zotero_query", "").strip(),
+                    "author": request.form.get("zotero_author", "").strip(),
+                    "year": request.form.get("zotero_year", "").strip(),
+                    "tag": request.form.get("zotero_tag", "").strip(),
+                    "journal": request.form.get("zotero_journal", "").strip(),
+                }
+                zotero_results = search_zotero_references(library_id, **zotero_filters, limit=50)
+                snippet_id = request.form.get("snippet_document_id", "").strip()
+                if snippet_id:
+                    try:
+                        zotero_snippet = build_writing_snippet(int(snippet_id))
+                    except Exception:
+                        zotero_snippet = ""
+        folders = MaterialFolderRepo.list_by_library(library_id)
+        folder_tree = MaterialFolderRepo.tree_by_library(library_id)
+        documents = LibraryDocumentRepo.list_by_library(library_id, folder_id=folder_filter or None)
+        library_index = build_library_index_summary(library_id)
+        zotero_recent = search_zotero_references(library_id, limit=40)
+
+        # ── Classification: auto-categorize all items ──
+        all_active_refs = zotero_results if zotero_results else zotero_recent
+        classified_refs = classify_refs(all_active_refs) if all_active_refs else []
+
+        # Also classify regular library documents for category filtering
+        classified_docs = classify_refs(documents) if documents else []
+        for doc in classified_docs:
+            if isinstance(doc.get("tags"), str):
+                try:
+                    doc["tags"] = json.loads(doc["tags"])
+                except (json.JSONDecodeError, TypeError):
+                    doc["tags"] = []
+
+        # Build category tree from ALL library documents
+        category_tree = build_category_tree(documents) if documents else []
+        classification_rules_json = get_rules_json()
+
+        all_libraries = MaterialLibraryRepo.list(limit=100)
+        return render_template(
+            "library_detail.html",
+            library=library,
+            library_index=library_index,
+            all_libraries=all_libraries,
+            folders=folders,
+            folder_tree=folder_tree,
+            folder_filter=folder_filter,
+            selected_folder=selected_folder,
+            documents=documents,
+            search_query=search_query,
+            search_results=search_results,
+            zotero_results=zotero_results,
+            zotero_recent=zotero_recent,
+            classified_refs=classified_refs,
+            classified_docs=classified_docs,
+            category_tree=category_tree,
+            classification_rules_json=classification_rules_json,
+            zotero_filters=zotero_filters,
+            zotero_snippet=zotero_snippet,
+            message=message,
+        )
+
+    @app.route("/libraries/<int:library_id>/documents/<int:document_id>")
+    def library_document_page(library_id, document_id):
+        library = MaterialLibraryRepo.get(library_id)
+        doc = LibraryDocumentRepo.get(document_id)
+        if not library or not doc or doc["library_id"] != library_id:
+            return "文档未找到", 404
+        chunks = DocumentChunkRepo.list_by_document(document_id, limit=200)
+        source_guide = build_source_guide(doc, chunks)
+        zotero_reference = get_reference(document_id) if doc.get("source_type") == "zotero" else None
+        zotero_snippet = build_writing_snippet(document_id) if zotero_reference else ""
+        zotero_citation_chinese = format_citation(zotero_reference) if zotero_reference else ""
+        zotero_citation_apa = format_citation(zotero_reference, style="apa") if zotero_reference else ""
+        return render_template(
+            "library_document.html",
+            library=library,
+            document=doc,
+            chunks=chunks,
+            source_guide=source_guide,
+            zotero_reference=zotero_reference,
+            zotero_snippet=zotero_snippet,
+            zotero_citation_chinese=zotero_citation_chinese,
+            zotero_citation_apa=zotero_citation_apa,
+        )
+
     @app.route("/styles")
     def styles_page():
         s = style_registry.list_info()
@@ -434,16 +726,6 @@ def create_app():
         examples = []
         if db_style:
             examples = StyleExampleRepo.list_by_style(db_style["id"])
-        # Load orphaned examples (style_id that no longer exists in styles table)
-        orphaned = []
-        conn = get_connection()
-        valid_ids = conn.execute("SELECT id FROM styles").fetchall()
-        valid_ids_set = {r["id"] for r in valid_ids}
-        all_examples = conn.execute("SELECT * FROM style_examples ORDER BY id DESC").fetchall()
-        for ex in all_examples:
-            if ex["style_id"] not in valid_ids_set:
-                orphaned.append(dict(ex))
-        conn.close()
         info = {
             "name": style_obj.name,
             "display_name": style_obj.display_name,
@@ -453,7 +735,6 @@ def create_app():
             "db_id": db_style["id"] if db_style else None,
             "prompt_template": prompt,
             "examples": examples,
-            "orphaned_examples": orphaned,
         }
         return render_template("style_detail.html", style=info)
 
@@ -518,14 +799,14 @@ def create_app():
     @app.route("/settings")
     def settings_page():
         """设置页面：微信凭证配置。"""
-        config_path = os.path.expanduser("~/.claude/skills/wechat-typeset-pro/config.json")
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "skills", "wechat-typeset-pro", "config.json")
         creds = {"app_id": "", "app_secret": "", "author": ""}
         if os.path.isfile(config_path):
             with open(config_path, encoding="utf-8") as f:
                 cfg = json.load(f)
                 creds = cfg.get("wechat", creds)
         # Also read from .env
-        env_path = os.path.expanduser("~/.openclaw/.env")
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), ".env")
         env_creds = {}
         if os.path.isfile(env_path):
             with open(env_path, encoding="utf-8") as f:
@@ -550,9 +831,6 @@ def create_app():
         material = MaterialRepo.get(session["material_id"])
         articles = ArticleRepo.list_by_session(session_id)
         for a in articles:
-            # Add display_name from style registry
-            style_obj = style_registry.get(a.get("style", ""))
-            a["display_name"] = style_obj.display_name if style_obj else a.get("style", "")
             try:
                 candidates_raw = a.get("headline_candidates", "[]")
                 if isinstance(candidates_raw, str):
@@ -569,26 +847,151 @@ def create_app():
     def api_styles():
         return jsonify(style_registry.list_info())
 
+    @app.route("/api/v1/libraries")
+    def api_libraries():
+        return jsonify(MaterialLibraryRepo.list(limit=100))
+
+    @app.post("/api/v1/libraries")
+    def api_create_library():
+        data = request.get_json(silent=True) or request.form
+        name = (data.get("name") or "").strip()
+        if not name:
+            return jsonify({"status": "error", "message": "素材库名称不能为空"}), 400
+        library_id = MaterialLibraryRepo.create(
+            name=name,
+            description=(data.get("description") or "").strip(),
+            topic=(data.get("topic") or "").strip(),
+            discipline=(data.get("discipline") or "").strip(),
+            strict_grounding=1 if data.get("strict_grounding") == "1" else 0,
+        )
+        lib = MaterialLibraryRepo.get(library_id)
+        return jsonify({"status": "ok", "library": lib}), 201
+
+    @app.route("/api/v1/libraries/<int:library_id>/folders", methods=["GET", "POST"])
+    def api_library_folders(library_id):
+        if not MaterialLibraryRepo.get(library_id):
+            return jsonify({"status": "error", "message": "素材库不存在"}), 404
+        if request.method == "POST":
+            data = request.get_json() or {}
+            name = (data.get("name") or "").strip()
+            if not name:
+                return jsonify({"status": "error", "message": "文件夹名称不能为空"}), 400
+            folder_id = MaterialFolderRepo.create(
+                library_id=library_id,
+                name=name,
+                parent_id=data.get("parent_id"),
+                description=(data.get("description") or "").strip(),
+                sort_order=data.get("sort_order") or 0,
+            )
+            return jsonify({"status": "ok", "id": folder_id})
+        return jsonify({"status": "ok", "folders": MaterialFolderRepo.list_by_library(library_id)})
+
+    @app.route("/api/v1/libraries/<int:library_id>/index")
+    def api_library_index(library_id):
+        if not MaterialLibraryRepo.get(library_id):
+            return jsonify({"status": "error", "message": "素材库不存在"}), 404
+        return jsonify({"status": "ok", "index": build_library_index_summary(library_id)})
+
+    @app.route("/libraries/<int:library_id>/zotero/export.<fmt>")
+    def zotero_export_page(library_id, fmt):
+        if not MaterialLibraryRepo.get(library_id):
+            return "素材库不存在", 404
+        if fmt == "bib":
+            content = export_references(library_id, fmt="bibtex")
+            return app.response_class(
+                content,
+                mimetype="application/x-bibtex; charset=utf-8",
+                headers={"Content-Disposition": f"attachment; filename=library-{library_id}.bib"},
+            )
+        if fmt in {"json", "csl.json"}:
+            content = export_references(library_id, fmt="csl-json")
+            return app.response_class(
+                content,
+                mimetype="application/json; charset=utf-8",
+                headers={"Content-Disposition": f"attachment; filename=library-{library_id}.csl.json"},
+            )
+        return "不支持的导出格式", 400
+
+    @app.route("/api/v1/libraries/<int:library_id>/zotero/search")
+    def api_zotero_search(library_id):
+        if not MaterialLibraryRepo.get(library_id):
+            return jsonify({"status": "error", "message": "素材库不存在"}), 404
+        refs = search_zotero_references(
+            library_id,
+            query=request.args.get("q", "").strip(),
+            author=request.args.get("author", "").strip(),
+            year=request.args.get("year", "").strip(),
+            tag=request.args.get("tag", "").strip(),
+            journal=request.args.get("journal", "").strip(),
+            limit=int(request.args.get("limit", 50) or 50),
+        )
+        return jsonify({"status": "ok", "references": refs})
+
+    @app.route("/api/v1/libraries/<int:library_id>/zotero/reference-pack")
+    def api_zotero_reference_pack(library_id):
+        if not MaterialLibraryRepo.get(library_id):
+            return jsonify({"status": "error", "message": "素材库不存在"}), 404
+        pack = build_reference_pack(
+            [library_id],
+            request.args.get("q", "").strip(),
+            top_k=int(request.args.get("top_k", 6) or 6),
+            citation_style=request.args.get("style", "chinese").strip() or "chinese",
+            folder_id=request.args.get("folder_id") or None,
+        )
+        return jsonify({"status": "ok", **pack})
+
+    @app.route("/api/v1/zotero/references/<int:document_id>/snippet")
+    def api_zotero_snippet(document_id):
+        ref = get_reference(document_id)
+        if not ref:
+            return jsonify({"status": "error", "message": "文献不存在"}), 404
+        snippet = build_writing_snippet(ref)
+        return jsonify({"status": "ok", "reference": ref, "snippet": snippet})
+
+    @app.route("/api/v1/libraries/<int:library_id>/folders/<int:folder_id>", methods=["PATCH", "POST"])
+    def api_update_library_folder(library_id, folder_id):
+        folder = MaterialFolderRepo.get(folder_id)
+        if not folder or folder["library_id"] != library_id:
+            return jsonify({"status": "error", "message": "文件夹不存在"}), 404
+        data = request.get_json(silent=True) or request.form or {}
+        try:
+            MaterialFolderRepo.update(
+                folder_id,
+                name=(data.get("name") or folder["name"]).strip(),
+                description=(data.get("description") if data.get("description") is not None else folder["description"]),
+                parent_id=data.get("parent_id") if data.get("parent_id") is not None else folder["parent_id"],
+                sort_order=data.get("sort_order") if data.get("sort_order") is not None else folder["sort_order"],
+            )
+        except ValueError as e:
+            return jsonify({"status": "error", "message": str(e)}), 400
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/v1/libraries/search", methods=["POST"])
+    def api_libraries_search():
+        data = request.get_json() or {}
+        library_ids = data.get("library_ids") or []
+        query = (data.get("query") or "").strip()
+        mode = (data.get("mode") or "material_first").strip()
+        top_k = int(data.get("top_k") or 8)
+        folder_id = data.get("folder_id") or None
+        if not query or not library_ids:
+            return jsonify({"status": "error", "message": "缺少 library_ids 或 query"}), 400
+        evidence = build_evidence_pack(library_ids, query, mode=mode, top_k=top_k, folder_id=folder_id)
+        return jsonify({"status": "ok", **evidence})
+
+    @app.route("/api/v1/write/preview-retrieval", methods=["POST"])
+    def api_preview_retrieval():
+        data = request.get_json() or {}
+        library_ids = data.get("library_ids") or []
+        query = (data.get("query") or "").strip()
+        mode = (data.get("mode") or "material_first").strip()
+        folder_id = data.get("folder_id") or None
+        evidence = build_evidence_pack(library_ids, query, mode=mode, top_k=8, folder_id=folder_id)
+        return jsonify({"status": "ok", **evidence})
+
     @app.route("/api/v1/headlines/library", methods=["POST"])
     def api_add_headline_library():
         data = request.get_json()
-        headlines_raw = data.get("headlines") if data else None
-        if headlines_raw and isinstance(headlines_raw, list):
-            # Batch add
-            style = (data.get("style", "") if data else "").strip()
-            note = (data.get("note", "") if data else "").strip()
-            source = (data.get("source", "") if data else "").strip()
-            added = 0
-            for h in headlines_raw:
-                h_text = (h or "").strip()
-                if not h_text:
-                    continue
-                if len(h_text) > 120:
-                    h_text = h_text[:120]
-                HeadlineLibraryRepo.create(h_text, style, note, source)
-                added += 1
-            return jsonify({"status": "ok", "added": added})
-        # Single add (backwards compatible)
         headline = (data.get("headline", "") if data else "").strip()
         if not headline:
             return jsonify({"status": "error", "message": "标题不能为空"}), 400
@@ -885,120 +1288,62 @@ def create_app():
         name = data["name"].strip().lower().replace(" ", "_")
         if StyleRepo.get_by_name(name):
             return jsonify({"status": "error", "message": "风格标识已存在"}), 400
-        config = {"prompt_template": _sanitize_style_prompt_template(data.get("prompt_template", ""))}
+        config = {"prompt_template": data.get("prompt_template", ""), "category": data.get("category", "custom")}
         StyleRepo.create(name, data["display_name"], data.get("description", ""), config, is_builtin=0)
         style_registry.reload()
         return jsonify({"status": "ok"})
 
-    @app.route("/api/v1/styles/draft-optimize", methods=["POST"])
-    def api_optimize_draft_style():
+    @app.route("/api/v1/skills/distill", methods=["POST"])
+    def api_distill_skill():
         data = request.get_json()
         if not data:
-            return jsonify({"status": "error", "message": "缺少参数"}), 400
-        display_name = (data.get("display_name", "") or "").strip()
-        description = (data.get("description", "") or "").strip()
-        current_prompt = (data.get("prompt_template", "") or "").strip()
-        examples = data.get("examples", []) or []
-        file_payloads = data.get("file_payloads", []) or []
-        valid_examples = []
-        for ex in examples:
-            content = (ex.get("content", "") if isinstance(ex, dict) else "").strip()
-            if not content:
-                continue
-            valid_examples.append({
-                "title": (ex.get("title", "") if isinstance(ex, dict) else "").strip() or "无标题",
-                "content": content,
-                "source": (ex.get("source", "") if isinstance(ex, dict) else "").strip(),
-            })
-        extracted_files = _extract_file_payloads(file_payloads)
-        if extracted_files.strip():
-            valid_examples.append({
-                "title": "上传文件解析结果",
-                "content": extracted_files.strip(),
-                "source": "uploaded_files",
-            })
-        if not valid_examples:
-            return jsonify({"status": "error", "message": "请先粘贴参考素材"}), 400
+            return jsonify({"status": "error", "message": "缺少请求内容"}), 400
 
-        ref_parts = []
-        for ex in valid_examples[:8]:
-            ref_parts.append(f"--- {ex['title']}（{len(ex['content'])}字）---\n{ex['content'][:4000]}")
-        ref_text = "\n\n".join(ref_parts)
-        style_label = display_name or "新风格"
-        seed_prompt = current_prompt or f"""# {style_label}写作风格
+        target_type = (data.get("target_type") or "person").strip()
+        target_name = (data.get("target_name") or "").strip()
+        purpose = (data.get("purpose") or "").strip()
+        materials = (data.get("materials") or "").strip()
+        path = (data.get("path") or "").strip()
+        url = (data.get("url") or "").strip()
+        add_to_styles = bool(data.get("add_to_styles", True))
 
-你正在模仿一种个人写作声音。先用 2-3 句话定义这个写作者是谁、在什么状态下写作、作品读起来像什么。
-
-## 核心价值观
-
-## 素材理解与选题判断
-
-## 输出形态（文章/歌词/诗歌等）
-
-## 语言风格
-
-## 结构特征
-
-## 具体细节的使用
-
-## 情绪表达方式
-
-## 节奏与段落
-
-## 推荐表达
-
-## 绝对禁区
-
-## 输出要求
-"""
-        prompt = f"""你是一位写作风格 Skill 作者。你的任务不是总结改进点，而是基于参考素材，输出一份完整可直接用于写作生成的风格 prompt。
-
-风格名称：{style_label}
-补充描述：{description or "无"}
-
-当前草稿 prompt：
-{seed_prompt}
-
-参考素材：
-{ref_text}
-
-请严格按下面骨架输出完整 prompt，保留所有标题：
-
-# {style_label}写作风格
-
-你正在模仿一种个人写作声音。先用 2-3 句话定义这个写作者是谁、在什么状态下写作、文章读起来像什么。
-
-## 核心价值观
-
-## 素材理解与选题判断
-
-## 输出形态（文章/歌词/诗歌等）
-
-## 语言风格
-
-## 结构特征
-
-## 具体细节的使用
-
-## 情绪表达方式
-
-## 节奏与段落
-
-## 推荐表达
-
-## 绝对禁区
-
-## 输出要求
-
-要求：
-- 必须从参考素材里归纳，不要空泛。
-- 直接输出完整 prompt，不要解释，不要写"主要改进点"。
-- 不要创建文件。"""
+        material_parts = []
+        if materials:
+            material_parts.append(f"## 手动材料\n\n{materials}")
+        if url:
+            material_parts.append(f"## URL 线索\n\n{url}")
+        if path:
+            try:
+                from ..core.input_reader import read_input as read_path
+                path_content, _, path_title = read_path(path)
+                material_parts.append(f"## 本地路径材料：{path_title or path}\n\n{path_content}")
+            except Exception as e:
+                material_parts.append(f"## 本地路径材料读取失败\n\n{path}\n\n错误：{e}")
         try:
-            result = _sanitize_style_prompt_template(claude_call(prompt).strip())
-            if len(result) > 14000:
-                result = result[:14000].rstrip()
-            return jsonify({"status": "ok", "prompt_template": result})
+            file_payloads = data.get("file_payloads") or []
+            extracted = _extract_file_payloads(file_payloads)
+            if extracted.strip():
+                material_parts.append(f"## 上传文件材料\n\n{extracted}")
+        except Exception as e:
+            material_parts.append(f"## 上传文件解析失败\n\n{e}")
+
+        combined_materials = "\n\n---\n\n".join(material_parts)
+        try:
+            result = nuwa_distiller.distill(
+                target_type=target_type,
+                target_name=target_name,
+                purpose=purpose,
+                materials=combined_materials,
+                path=path,
+                url=url,
+                add_to_styles=add_to_styles,
+            )
+            style_registry.reload()
+            return jsonify(result)
+        except FileExistsError as e:
+            return jsonify({"status": "error", "message": str(e)}), 409
+        except ValueError as e:
+            return jsonify({"status": "error", "message": str(e)}), 400
         except Exception as e:
             return jsonify({"status": "error", "message": str(e)}), 500
 
@@ -1070,7 +1415,7 @@ def create_app():
         if not data or "prompt_template" not in data:
             return jsonify({"status": "error", "message": "No prompt"}), 400
         config = json.loads(db_style["config"]) if isinstance(db_style["config"], str) else db_style.get("config", {})
-        config["prompt_template"] = _sanitize_style_prompt_template(data["prompt_template"])
+        config["prompt_template"] = data["prompt_template"]
         conn = get_connection()
         conn.execute("UPDATE styles SET config = ? WHERE name = ?", (json.dumps(config, ensure_ascii=False), name))
         conn.commit()
@@ -1097,7 +1442,7 @@ def create_app():
             style_obj = style_registry.get(name)
             if style_obj:
                 current_prompt = style_obj.get_prompt_template()
-        required_sections = ("## 核心价值观", "## 输出形态", "## 语言风格", "## 绝对禁区", "## 输出要求")
+        required_sections = ("## 核心价值观", "## 文章原型", "## 语言风格", "## 绝对禁区", "## 输出要求")
         invalid_markers = ("主要改进点", "文件已保存", "已输出优化后的", "优化后的写作 prompt。", "已优化")
 
         def is_complete_prompt(text):
@@ -1110,7 +1455,7 @@ def create_app():
 
 参考文章：{ref_text}
 
-请基于参考文章，在"当前 prompt"的基础上做增量优化，输出一份"完整可直接用于写作生成"的风格 prompt。
+请基于参考文章，在“当前 prompt”的基础上做增量优化，输出一份“完整可直接用于写作生成”的风格 prompt。
 
 注意：
 - 保留当前 prompt 已经写得好的规则。
@@ -1128,7 +1473,7 @@ def create_app():
 
 ## 素材理解与选题判断
 
-## 输出形态（文章/歌词/诗歌等）
+## 文章原型
 
 ## 语言风格
 
@@ -1147,12 +1492,12 @@ def create_app():
 ## 输出要求
 
 严禁：
-- 不要输出"主要改进点"
-- 不要输出"文件已保存"
-- 不要输出"已优化"
+- 不要输出“主要改进点”
+- 不要输出“文件已保存”
+- 不要输出“已优化”
 - 不要输出总结、评价、说明或分析报告
 - 不要只写摘要
-- 不要写"已输出优化后的写作 prompt"
+- 不要写“已输出优化后的写作 prompt”
 - 不要用编号列表解释你做了什么
 - 不要创建文件
 
@@ -1176,7 +1521,7 @@ def create_app():
 
 ## 核心价值观
 ## 素材理解与选题判断
-## 输出形态
+## 文章原型
 ## 语言风格
 ## 结构特征
 ## 具体细节的使用
@@ -1186,7 +1531,7 @@ def create_app():
 ## 绝对禁区
 ## 输出要求
 
-不要解释，不要总结，不要写"主要改进点"，直接输出完整 prompt。"""
+不要解释，不要总结，不要写“主要改进点”，直接输出完整 prompt。"""
                 repaired = claude_call(repair_prompt).strip()
                 if len(repaired) > 12000:
                     repaired = repaired[:12000].rstrip()
@@ -1207,7 +1552,7 @@ def create_app():
 - 保留具体经历、地点、价格、时间、人物互动，不急着抽象总结。
 - 如果素材只是零散记录，就把它整理成一条自然的个人观察线。
 
-## 输出形态
+## 文章原型
 {result}
 
 ## 语言风格
@@ -1236,15 +1581,15 @@ def create_app():
 - 段落之间要像自然想到下一件事。
 
 ## 推荐表达
-- "其实"
-- "不过"
-- "话说回来"
-- "我后来才发现"
-- "这件事有点奇怪"
+- “其实”
+- “不过”
+- “话说回来”
+- “我后来才发现”
+- “这件事有点奇怪”
 
 ## 绝对禁区
 - 不要输出 AI 解释、改动说明或写作分析。
-- 不要使用"首先、其次、最后"。
+- 不要使用“首先、其次、最后”。
 - 不要强行升华。
 - 不要用空泛套话。
 
@@ -1298,29 +1643,6 @@ def create_app():
         StyleExampleRepo.delete(example_id)
         return jsonify({"status": "ok"})
 
-    @app.route("/api/v1/styles/<name>/examples/reclaim", methods=["POST"])
-    def api_reclaim_examples(name):
-        """Re-assign orphaned examples to this style."""
-        db_style = StyleRepo.get_by_name(name)
-        if not db_style:
-            return jsonify({"status": "error", "message": "Style not found"}), 404
-        data = request.get_json() or {}
-        example_ids = data.get("example_ids", [])
-        if not example_ids:
-            return jsonify({"status": "error", "message": "No example IDs"}), 400
-        conn = get_connection()
-        # Verify these examples are actually orphaned
-        valid_ids = {r["id"] for r in conn.execute("SELECT id FROM styles").fetchall()}
-        reclaimed = 0
-        for eid in example_ids:
-            ex = conn.execute("SELECT * FROM style_examples WHERE id = ?", (eid,)).fetchone()
-            if ex and ex["style_id"] not in valid_ids:
-                conn.execute("UPDATE style_examples SET style_id = ? WHERE id = ?", (db_style["id"], eid))
-                reclaimed += 1
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "ok", "reclaimed": reclaimed})
-
     @app.route("/api/v1/material/<int:material_id>", methods=["DELETE"])
     def api_delete_material(material_id):
         MaterialRepo.delete(material_id)
@@ -1371,33 +1693,17 @@ def create_app():
         return jsonify({"status": "ok", "candidates": candidates, "selected": a.get("headline_selected", ""), "title": a.get("title", "")})
 
     @app.route("/api/v1/article/<int:article_id>/headline", methods=["POST"])
-    @app.route("/api/v1/article/<int:article_id>/select-headline", methods=["POST"])
     def api_select_headline(article_id):
         data = request.get_json()
         if not data or "headline" not in data:
             return jsonify({"status": "error", "message": "No headline"}), 400
         headline = data["headline"]
         formula = data.get("formula", "")
-        is_custom = 1 if data.get("is_custom") else 0
         article = ArticleRepo.get(article_id)
-        if not article:
-            return jsonify({"status": "error", "message": "Not found"}), 404
         session = SessionRepo.get(article["session_id"]) if article else None
-        if headline:
-            HeadlineFeedbackRepo.record(article_id=article_id, headline=headline, formula_name=formula, was_selected=1, is_custom=is_custom, material_id=session["material_id"] if session else 0, style=article.get("style", ""))
+        HeadlineFeedbackRepo.record(article_id=article_id, headline=headline, formula_name=formula, was_selected=1, material_id=session["material_id"] if session else 0, style=article.get("style", ""))
         ArticleRepo.select_headline(article_id, headline)
         return jsonify({"status": "ok"})
-
-    def _apply_request_headline(article_id, data):
-        """Persist a headline passed with archive/typeset/publish payloads."""
-        if not data or "headline" not in data:
-            return
-        headline = (data.get("headline") or "").strip()
-        if headline:
-            ArticleRepo.select_headline(article_id, headline)
-
-    def _article_title(article):
-        return article.get("headline_selected") or article.get("title") or article.get("original_title") or "无标题"
 
     def _save_article_content(article_id, content):
         article = ArticleRepo.get(article_id)
@@ -1425,11 +1731,61 @@ def create_app():
         data = request.get_json()
         if not data or "content" not in data:
             return jsonify({"status": "error", "message": "No content"}), 400
-        _apply_request_headline(article_id, data)
         ok = _save_article_content(article_id, data["content"])
         if not ok:
             return jsonify({"status": "error", "message": "Not found"}), 404
         return jsonify({"status": "ok"})
+
+    @app.route("/api/v1/article/<int:article_id>/verify-citations", methods=["GET"])
+    def api_verify_article_citations(article_id):
+        """Run citation verification on a generated article and return results."""
+        article = ArticleRepo.get(article_id)
+        if not article:
+            return jsonify({"status": "error", "message": "Not found"}), 404
+        try:
+            result = verify_citations(article_id)
+            report = format_citation_report(result)
+            return jsonify({
+                "status": "ok",
+                **result.to_dict(),
+                "report": report,
+            })
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+    @app.route("/api/v1/article/<int:article_id>/footnotes", methods=["GET"])
+    def api_article_footnotes(article_id):
+        """Return formatted footnotes for a generated article."""
+        article = ArticleRepo.get(article_id)
+        if not article:
+            return jsonify({"status": "error", "message": "Not found"}), 404
+        try:
+            # Load evidence from the article's retrieval snapshot
+            from ..db.repository import RetrievalSnapshotRepo
+            citation_summary = article.get("citation_summary", "{}")
+            if isinstance(citation_summary, str):
+                citation_summary = json.loads(citation_summary)
+            snapshot_id = (citation_summary or {}).get("snapshot_id", 0)
+            evidence_results = []
+            if snapshot_id:
+                snapshot = RetrievalSnapshotRepo.get(snapshot_id)
+                if snapshot:
+                    raw = snapshot.get("evidence_json", "{}")
+                    if isinstance(raw, str):
+                        raw = json.loads(raw)
+                    evidence_results = (raw.get("results", []) if isinstance(raw, dict) else [])
+
+            formatted_content, footnotes = format_article_footnotes(
+                article.get("content", ""),
+                evidence_results,
+            )
+            return jsonify({
+                "status": "ok",
+                "formatted_content": formatted_content,
+                "footnotes": footnotes,
+            })
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
 
     @app.route("/api/v1/article/<int:article_id>/restore", methods=["POST"])
     def api_restore_article(article_id):
@@ -1462,15 +1818,12 @@ def create_app():
         if not article:
             return jsonify({"status": "error", "message": "Not found"}), 404
         data = request.get_json()
-        _apply_request_headline(article_id, data)
         content = data.get("content", "") if data else ""
         if not content:
             content = article["content"]
         # Clean AI preamble before archiving
         content = _clean_output(content)
-        _save_article_content(article_id, content)
-        article = ArticleRepo.get(article_id) or article
-        title = _article_title(article)
+        title = article.get("headline_selected") or article.get("title", "") or "无标题"
         try:
             path = archive_to_works(content, title, article.get("style", ""))
             ArticleRepo.set_output_path(article_id, path)
@@ -1478,7 +1831,7 @@ def create_app():
         except Exception as e:
             return jsonify({"status": "error", "message": str(e)}), 500
 
-    SAVE_DIR = os.path.expanduser("~/WorkBuddy/wechat-typeset-pro")
+    SAVE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "output")
 
     def _enhance_markdown(content, title):
         """Preprocess Markdown to improve typeset quality — mirrors skill workflow steps 1.5+2."""
@@ -1494,7 +1847,7 @@ def create_app():
             md += (
                 '\n\n---\n\n'
                 '<font color="#808080"><i>感谢阅读。如果对你有帮助，欢迎点赞收藏转发。</i></font>\n'
-                '<font color="#808080"><i>关注公众号律海流深，获取更多 AI 实操经验。</i></font>'
+                '<font color="#808080"><i>感谢阅读。</i></font>'
             )
         return md
 
@@ -1513,7 +1866,7 @@ def create_app():
         with open(md_path, "w", encoding="utf-8") as f:
             f.write(md_content)
 
-        format_script = os.path.expanduser("~/.claude/skills/wechat-typeset-pro/scripts/format.py")
+        format_script = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "skills", "wechat-typeset-pro", "scripts", "format.py")
         if not os.path.isfile(format_script):
             raise FileNotFoundError("排版工具未找到")
 
@@ -1543,12 +1896,10 @@ def create_app():
         if not article:
             return jsonify({"status": "error", "message": "Not found"}), 404
         data = request.get_json()
-        _apply_request_headline(article_id, data)
         content = data.get("content", "") if data else ""
         if not content:
             content = article["content"]
-        article = ArticleRepo.get(article_id) or article
-        title = _article_title(article)
+        title = article.get("headline_selected") or article.get("title", "") or "无标题"
         content = _clean_output(content)
 
         try:
@@ -1573,13 +1924,11 @@ def create_app():
         if not article:
             return jsonify({"status": "error", "message": "Not found"}), 404
         data = request.get_json()
-        _apply_request_headline(article_id, data)
         content = data.get("content", "") if data else ""
         if not content:
             content = article["content"]
         theme = (data or {}).get("theme", "terracotta")
-        article = ArticleRepo.get(article_id) or article
-        title = _article_title(article)
+        title = article.get("headline_selected") or article.get("title", "") or "无标题"
         content = _clean_output(content)
 
         # 1. Format with chosen theme
@@ -1592,7 +1941,7 @@ def create_app():
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(md_content)
 
-            format_script = os.path.expanduser("~/.claude/skills/wechat-typeset-pro/scripts/format.py")
+            format_script = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "skills", "wechat-typeset-pro", "scripts", "format.py")
             result = subprocess.run(
                 ["python3", format_script, "--input", md_path, "--theme", theme, "--no-open"],
                 capture_output=True, text=True, timeout=60,
@@ -1607,13 +1956,13 @@ def create_app():
         # 2. Push to WeChat draft
         file_stem = re.sub(r"-(公众号|小红书|微博)$", "", os.path.splitext(fname)[0])
         article_dir = os.path.join(SAVE_DIR, file_stem)
-        publish_script = os.path.expanduser("~/.claude/skills/wechat-typeset-pro/scripts/publish.py")
+        publish_script = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "skills", "wechat-typeset-pro", "scripts", "publish.py")
         if not os.path.isfile(publish_script):
             return jsonify({"status": "error", "message": "发布工具未找到"}), 500
 
         default_cover = os.path.expanduser(
             "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Obsidian Vault"
-            "/我的作品/图片素材/公众号封面（没有指定封面就用这张）.png"
+            ""
         )
         cmd = ["python3", publish_script, "--dir", article_dir]
         if os.path.isfile(default_cover):
@@ -1648,7 +1997,7 @@ def create_app():
         style_prompt = ""
         if style_obj and hasattr(style_obj, "get_prompt_template"):
             style_prompt = style_config.get("prompt_template") or style_obj.get_prompt_template()
-        format_rules = _format_rules_for_style(style_name, style_config.get("output_form", "auto"))
+        format_rules = _format_rules_for_style(style_name)
         style_guardrails = DAILY_FINAL_GUARDRAILS if style_name == "daily" else ""
         rewrite_prompt = f"""我需要对下面这篇文章进行修改。
 
@@ -1665,15 +2014,11 @@ def create_app():
 修改要求
 {instruction}
 
-{STRICT_OUTPUT_RULES}
-{HARD_CONSTRAINT_REPAIR_RULES}
+{STRICT_ARTICLE_OUTPUT_RULES}
 
 ## 修改时的硬性要求
-- 严格保留用户真正要表达的对象，不要偷换概念。比如用户说的是"香港的菜/食物"，就不要改成"香港这座城市"。
-- 修改只作用于文章内容本身，不要追加"主要改动""修改说明""表格""原文/修改/原因"。
-- 必须真正落实"修改要求"，不能只润色原文后原样返回。
-- 如果用户要求补入新的原因、新的判断、新的情绪立场，这些内容必须明确写进正文。
-- 修改后的正文必须和当前版本有可见差异；如果几乎没改，说明这次修改失败，需要重写。
+- 严格保留用户真正要表达的对象，不要偷换概念。比如用户说的是“香港的菜/食物”，就不要改成“香港这座城市”。
+- 修改只作用于文章内容本身，不要追加“主要改动”“修改说明”“表格”“原文/修改/原因”。
 {format_rules}
 
         直接输出修改后的完整文章，不要解释，不要创建文件。"""
@@ -1683,37 +2028,23 @@ def create_app():
             result = _clean_output(raw_result) if raw_result else ""
             if style_name == "daily":
                 result = _strip_daily_headings(result)
-            result = _hard_enforce_output(result, rewrite_prompt, style_name)
-            if (
-                not result
-                or looks_like_edit_report(raw_result)
-                or looks_like_edit_report(result)
-                or _looks_effectively_unchanged(current_content, result)
-            ):
+            if not result or looks_like_edit_report(raw_result) or looks_like_edit_report(result):
                 retry_prompt = f"""{rewrite_prompt}
 
-上一次输出有问题。请重新输出：
+上一次输出的是“修改说明”，不是正文。请重新输出：
 - 只输出修改后的完整正文。
 - 第一行就进入文章内容。
-- 不要写"已在对话中输出""主要处理了""主要改动""修改说明"。
-- 不要列表说明你改了哪里。
-- 不要基本照抄原文。
-- 必须把"修改要求"里的新增信息和新增态度真正写进文章。"""
+- 不要写“已在对话中输出”“主要处理了”“主要改动”“修改说明”。
+- 不要列表说明你改了哪里。"""
                 raw_result = claude_call(retry_prompt)
                 raw_result = raw_result.strip() if raw_result else ""
                 result = _clean_output(raw_result) if raw_result else ""
                 if style_name == "daily":
                     result = _strip_daily_headings(result)
-                result = _hard_enforce_output(result, retry_prompt, style_name)
-            if (
-                not result
-                or looks_like_edit_report(raw_result)
-                or looks_like_edit_report(result)
-                or _looks_effectively_unchanged(current_content, result)
-            ):
+            if not result or looks_like_edit_report(raw_result) or looks_like_edit_report(result):
                 return jsonify({
                     "status": "error",
-                    "message": "这次修改没有真正落实到正文里，系统已经拦截，原文没有被覆盖。请再试一次。"
+                    "message": "模型返回了修改说明，不是正文；已拦截，正文没有被覆盖。请换一种更具体的修改要求再试。"
                 }), 502
             # Save original if first edit
             if not article.get("original_content"):
@@ -1721,12 +2052,7 @@ def create_app():
                 conn.execute("UPDATE articles SET original_content = content WHERE id = ? AND (original_content IS NULL OR original_content = '')", (article_id,))
                 conn.commit()
                 conn.close()
-            return jsonify({
-                "status": "ok",
-                "content": result,
-                "instruction": instruction,
-                "change_summary": _summarize_rewrite_changes(current_content, result),
-            })
+            return jsonify({"status": "ok", "content": result})
         except Exception as e:
             return jsonify({"status": "error", "message": str(e)}), 500
 
@@ -1781,7 +2107,7 @@ def create_app():
             return jsonify({"status": "error", "message": "APPID 和 AppSecret 不能为空"}), 400
 
         # Save to config.json
-        skill_config = os.path.expanduser("~/.claude/skills/wechat-typeset-pro/config.json")
+        skill_config = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "skills", "wechat-typeset-pro", "config.json")
         if os.path.isfile(skill_config):
             with open(skill_config, encoding="utf-8") as f:
                 cfg = json.load(f)
@@ -1792,10 +2118,9 @@ def create_app():
             with open(skill_config, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, ensure_ascii=False, indent=2)
 
-        # Save to ~/.openclaw/.env (publish.py reads this)
-        openclaw_dir = os.path.expanduser("~/.openclaw")
-        os.makedirs(openclaw_dir, exist_ok=True)
-        env_path = os.path.join(openclaw_dir, ".env")
+        # Save to project .env
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        env_path = os.path.join(project_root, ".env")
 
         # Read existing, update keys
         env_lines = {}

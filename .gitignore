@@ -1,5 +1,6 @@
 # Personal data and materials
-data/
+data/*
+!data/material_library/
 data.db
 草稿/
 config/
@@ -29,3 +30,6 @@ __pycache__/
 
 # OS files
 .DS_Store
+
+# Copy artifact (from previous failed rsync)
+Users/

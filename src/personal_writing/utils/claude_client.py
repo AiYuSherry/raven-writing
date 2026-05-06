@@ -1,7 +1,6 @@
 """Claude Code CLI subprocess wrapper."""
 
 import subprocess
-import json
 import tempfile
 import os
 import shutil
@@ -51,7 +50,7 @@ def _call_internal(prompt):
 
     try:
         proc = subprocess.Popen(
-            [CLAUDE_CMD, "--print", prompt_path],
+            [CLAUDE_CMD, "--print", "--permission-mode", "bypassPermissions", prompt_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
