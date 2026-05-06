@@ -1,6 +1,11 @@
 # Personal data and materials
 data/*
 !data/material_library/
+data/material_library/*
+!data/material_library/files/
+data/material_library/files/*
+!data/material_library/files/1/
+!data/material_library/files/1/**
 data.db
 草稿/
 config/
