@@ -318,7 +318,7 @@ class IntegrationTests(TempDbTestCase):
         captured = {}
 
         def fake_call(prompt):
-            captured["prompt"] = prompt
+            captured.setdefault("prompt", prompt)
             return "# 测试\n正文。"
 
         with patch("personal_writing.core.pipeline.claude_client.is_available", return_value=True), \

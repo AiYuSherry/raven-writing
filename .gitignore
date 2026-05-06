@@ -4,8 +4,6 @@ data/*
 data/material_library/*
 !data/material_library/files/
 data/material_library/files/*
-!data/material_library/files/1/
-!data/material_library/files/1/**
 data.db
 草稿/
 config/
@@ -14,18 +12,20 @@ Output/
 .claude/
 output.md
 investment*.xlsx
+docs/page-snapshot.txt
+docs/screenshot-*.png
 
 # Optional local prompt experiments
 prompts/*-local.md
 prompts/*.private.md
 
 # Personal documentation
-写作prompt优化.md
-风格提取-日常.md
-优化后的日常写作prompt.md
-河图歌词集介绍.md
-梦里和crush游武汉.md
-小红书_乌鸦写字台.md
+*.private.md
+*.local.md
+local-*.md
+private-*.md
+个人资料/
+私人素材/
 
 # Python cache
 __pycache__/

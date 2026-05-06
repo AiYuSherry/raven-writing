@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-PORT=5566
+PORT=5555
 URL="http://127.0.0.1:$PORT"
 PYTHON_BIN="${PYTHON_BIN:-.venv/bin/python}"
 

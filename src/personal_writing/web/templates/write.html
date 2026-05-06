@@ -118,26 +118,6 @@
         <input type="hidden" name="styles" id="styles-input" value="{{ selected|join(',') }}">
     </div>
 
-    <div class="card">
-        <h2>生成模式</h2>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <label class="mode-option active" onclick="selectGenerationMode('fast', this)">
-                <input type="radio" name="generation_mode" value="fast" checked>
-                <span>
-                    <strong>快速版</strong>
-                    <em>按当前风格快速出初稿，跳过二次润色、回顾和标题候选</em>
-                </span>
-            </label>
-            <label class="mode-option" onclick="selectGenerationMode('thinking', this)">
-                <input type="radio" name="generation_mode" value="thinking">
-                <span>
-                    <strong>思考版</strong>
-                    <em>按当前风格深度处理：更完整的风格提示词、润色和标题候选</em>
-                </span>
-            </label>
-        </div>
-    </div>
-
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button type="submit" class="btn" id="generateBtn">生成</button>
         <button type="button" class="btn btn-secondary" id="stopGenerateBtn" onclick="stopGeneration()" style="display:none;">停止生成</button>
@@ -550,8 +530,7 @@ document.addEventListener('DOMContentLoaded', function() {
             sessionStorage.setItem('pwPendingGeneration', JSON.stringify({
                 content: document.getElementById('materialInput').value,
                 path: document.getElementById('pathInput').value,
-                styles: selectedStyles,
-                generationMode: document.querySelector('input[name="generation_mode"]:checked')?.value || 'fast'
+                styles: selectedStyles
             }));
 
             const oldResults = document.getElementById('resultsCard');
@@ -634,14 +613,6 @@ function restoreStoppedGeneration() {
                 }
             });
         }
-        if (state.generationMode) {
-            const option = document.querySelector('input[name="generation_mode"][value="' + state.generationMode + '"]');
-            if (option) {
-                option.checked = true;
-                document.querySelectorAll('.mode-option').forEach(el => el.classList.remove('active'));
-                option.closest('.mode-option').classList.add('active');
-            }
-        }
         showToast('已回到生成前状态');
     } catch (e) {
         // Ignore malformed session state.
@@ -658,13 +629,6 @@ function toggleStyle(el, name) {
         el.classList.remove('selected');
     }
     document.getElementById('styles-input').value = selectedStyles.join(',');
-}
-
-function selectGenerationMode(mode, el) {
-    document.querySelectorAll('.mode-option').forEach(item => item.classList.remove('active'));
-    el.classList.add('active');
-    const input = el.querySelector('input[name="generation_mode"]');
-    if (input) input.checked = true;
 }
 
 function copyMarkdown(id, boxId) {

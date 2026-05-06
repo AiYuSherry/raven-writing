@@ -279,7 +279,7 @@ class PipelineRetrievalHookTests(TempDbTestCase):
         captured = {}
 
         def fake_call(prompt):
-            captured["prompt"] = prompt
+            captured.setdefault("prompt", prompt)
             return "# 算法治理的透明度义务\n正文引用素材库证据。[S1]"
 
         with patch("personal_writing.core.pipeline.claude_client.is_available", return_value=True), \

@@ -22,6 +22,29 @@ STRICT_ARTICLE_OUTPUT_RULES = """## 全局输出硬性规则
 - 如果需要修改文章，只把修改后的全文写出来，不要附带原因。"""
 
 
+HARD_CONSTRAINT_REPAIR_RULES = """## 输出前最终硬检查
+下面两类问题必须清零：
+1. 不得出现任何破折号或模拟破折号：——、—、--。
+2. 不得出现"不是……而是……""不是……，而是……""不是……，是……""不是……。是……"句式。
+
+如果原文需要表达对比，直接改成肯定陈述。"""
+
+
+CONTENT_FIDELITY_RULES = """## 素材边界硬规则
+- 只能使用"素材内容"里明确出现的人物、地点、事件、物品、时间、价格和情绪。
+- 风格 prompt 里的例子只用于学习语气和节奏，绝对不能写进正文事实。
+- 不得借用风格 prompt 示例里的五月天、台北、crush、演唱会、父母、投资等内容，除非它们也出现在本次素材里。
+- 不要替素材扩展新主题，不要补充素材没有写到的背景、活动、评价或结论。
+- 如果素材只有一句话，就围绕这一句话写，不要凭空加经历。"""
+
+
+NO_FOLLOWUP_QUESTION_RULES = """## 交付形态硬规则
+- 你的任务是直接交稿，不是和用户对话。
+- 不要反问用户，不要索要更多素材，不要说"如果你愿意""你是否有""你希望我按照""要不要我继续"。
+- 不要复述"我已读取文件内容""这是一个完整 prompt""文件包含了什么"。
+- 即使素材偏少，也要直接基于现有素材写出完整初稿。"""
+
+
 EDIT_REPORT_PATTERNS = (
     "已在对话中输出修改后的完整文章",
     "主要处理了",
@@ -62,6 +85,174 @@ def looks_like_edit_report(text):
     return bullet_lines >= 2 and len(report_bullets) >= 2
 
 
+def _violates_hard_constraints(text):
+    """Detect final-output patterns that should never survive generation."""
+    if not text:
+        return False
+    if re.search(r"——|—|--", text):
+        return True
+    if re.search(r"不是[^。！？\n]{0,80}而是", text):
+        return True
+    if re.search(r"不是[^。！？\n]{0,80}[，,]\s*是", text):
+        return True
+    if re.search(r"不是[^。！？\n]{0,40}[。！？]\s*是", text):
+        return True
+    return False
+
+
+def _mechanical_hard_cleanup(text):
+    """Cheap deterministic cleanup for punctuation and banned contrast syntax."""
+    if not text:
+        return ""
+    text = text.replace("——", "，").replace("—", "，").replace("--", "，")
+    text = re.sub(
+        r"([^。！？\n]{0,24}?)不是因为[^，,。！？\n]{1,80}[，,]?\s*而是因为([^。！？\n]+)",
+        r"\1原因是\2",
+        text,
+    )
+    text = re.sub(
+        r"([^。！？\n]{0,24}?)不是[^，,。！？\n]{1,80}[，,]?\s*而是([^。！？\n]+)",
+        r"\1是\2",
+        text,
+    )
+    text = re.sub(
+        r"([^。！？\n]{0,24}?)不是[^，,。！？\n]{1,80}[，,]\s*是([^。！？\n]+)",
+        r"\1是\2",
+        text,
+    )
+    text = re.sub(
+        r"([^。！？\n]{0,24}?)不是([^。！？\n]{1,40})[。！？]\s*是([^。！？\n]+)",
+        r"\1\3",
+        text,
+    )
+    text = re.sub(r"，{2,}", "，", text)
+    text = re.sub(r"，([。！？；;])", r"\1", text)
+    return text
+
+
+def _hard_enforce_output(text, write_prompt, style_name="", max_retries=2):
+    """Enforce hard constraints after generation without touching feature logic."""
+    text = _mechanical_hard_cleanup(text or "")
+    if not _violates_hard_constraints(text) or not claude_client.is_available():
+        return text
+
+    for attempt in range(1, max_retries + 1):
+        warning = f"""\n\n## 硬约束零容忍（第 {attempt} 次强制执行）
+
+上一版输出仍然包含被禁止的句式或标点。
+
+必须清零：
+1. 不得出现任何破折号或模拟破折号：——、—、--。
+2. 不得出现"不是……而是……""不是……，而是……""不是……，是……""不是……。是……"句式。
+
+直接输出完整正文，不要解释，不要修改说明。"""
+        try:
+            result = claude_client.call(write_prompt + warning)
+            result = _clean_output(result) if result else text
+            result = _mechanical_hard_cleanup(result)
+            if not _violates_hard_constraints(result):
+                return result
+            text = result
+        except Exception:
+            continue
+    return text
+
+
+STYLE_EXAMPLE_LEAK_TERMS = (
+    "五月天", "陈信宏", "阿信", "台北", "演唱会", "crush", "父母", "投资",
+    "东湖", "迪拜", "金铲铲", "崩坏星穹铁道", "omakase",
+)
+
+
+def _leaked_style_examples(text, source):
+    """Detect style-prompt example facts that leaked into generated content."""
+    if not text:
+        return []
+    source = source or ""
+    return [term for term in STYLE_EXAMPLE_LEAK_TERMS if term in text and term not in source]
+
+
+def _repair_content_fidelity(text, source, style_name=""):
+    """Retry once when output borrows facts from style examples."""
+    leaked = _leaked_style_examples(text, source)
+    if not leaked or not claude_client.is_available():
+        return text
+
+    prompt = f"""你刚才的正文混入了风格 prompt 里的示例内容，不是本次素材事实。
+
+当前风格：{style_name}
+误混入的词：{"、".join(leaked)}
+
+请只依据下面"素材内容"重写正文。风格示例只能学习语气，不能借用事实。
+
+{CONTENT_FIDELITY_RULES}
+{STRICT_ARTICLE_OUTPUT_RULES}
+{HARD_CONSTRAINT_REPAIR_RULES}
+
+## 素材内容
+{source[:12000]}
+
+## 需要重写的旧正文
+{text[:12000]}
+
+直接输出重写后的正文，不要解释。"""
+    try:
+        repaired = claude_client.call(prompt)
+        repaired = _clean_output(repaired) if repaired else text
+        return repaired or text
+    except Exception:
+        return text
+
+
+def _sanitize_style_prompt_template(text):
+    """Strip prompt wrappers/explanations so custom styles behave like style instructions."""
+    if not text:
+        return ""
+    cleaned = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    cleaned = re.sub(r"^```(?:markdown|md|text)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    heading_match = re.search(r"(?m)^#\s+.+?(?:写作风格|风格)\s*$", cleaned)
+    if heading_match:
+        cleaned = cleaned[heading_match.start():].strip()
+    cleaned = re.sub(
+        r"(?mis)^\s*(?:以下是根据.*?(?:完整(?:风格)?\s*prompt|写作风格)|已读取文件内容。.*?|这是一个.*?完整(?:写作)?\s*prompt.*?|文件包含了.*?|看起来这是一个.*?prompt.*?|你希望我按照这个 prompt.*?)(?:\n+|$)",
+        "",
+        cleaned,
+    ).strip()
+    cleaned = re.sub(
+        r"(?mis)\n+(?:你希望我按照.*|你是否有.*|如果你愿意.*|要不要我.*|请问你想让我.*)$",
+        "",
+        cleaned,
+    ).strip()
+    return cleaned
+
+
+def _looks_like_interactive_reply(text):
+    """Detect assistant-like follow-up questions accidentally returned instead of an article."""
+    if not text:
+        return True
+    probe = text.strip()[:1200]
+    markers = (
+        "你是否有",
+        "你希望我按照",
+        "要不要我",
+        "如果你愿意",
+        "请问你想让我",
+        "已读取文件内容",
+        "这是一个",
+        "完整写作 prompt",
+        "完整风格 prompt",
+        "看起来这是一个",
+        "无法满足",
+        "有具体的素材",
+    )
+    if any(marker in probe for marker in markers):
+        return True
+    question_lines = re.findall(r"(?m)^[^\n]{0,80}[？?]\s*$", probe)
+    bullet_questions = re.findall(r"(?m)^\s*[-*]\s+.*[？?]\s*$", probe)
+    return len(question_lines) + len(bullet_questions) >= 2
+
+
 DAILY_FINAL_GUARDRAILS = """## 日常风格最终覆盖规则
 这些规则优先级最高，如果和前文任何 prompt 冲突，以这里为准。
 - 这不是公众号长文，不是 Sherry 风格，不要写成观点文、分析文、游记攻略或城市评价。
@@ -74,7 +265,7 @@ DAILY_FINAL_GUARDRAILS = """## 日常风格最终覆盖规则
 
 HUMANIZER_SKILL_PATHS = [
     os.path.expanduser("~/.codex/skills/humanizer-zh/SKILL.md"),
-    "",
+    os.path.expanduser("~/.claude/skills/humanizer-zh/SKILL.md"),
 ]
 _HUMANIZER_SKILL_CACHE = None
 
@@ -99,8 +290,35 @@ def _load_humanizer_skill():
     return ""
 
 
-def _format_rules_for_style(style_name):
+_HARDCACHE = None
+
+
+def _load_hard_constraints():
+    """Load user hard constraints from prompts/hard_constraints.md."""
+    global _HARDCACHE
+    if _HARDCACHE is not None:
+        return _HARDCACHE
+    base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    path = os.path.join(base, "prompts", "hard_constraints.md")
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                _HARDCACHE = f.read().strip()
+                return _HARDCACHE
+        except Exception:
+            pass
+    _HARDCACHE = ""
+    return ""
+
+
+def _format_rules_for_style(style_name, output_form="文章"):
     """Return format rules that do not conflict with the selected style."""
+    if output_form in ("歌词", "诗歌"):
+        return f"""## 格式要求
+- 输出形态：{output_form}
+- 不要写标题，不要写“笔者”“作者”等文章框架词。
+- 用空行分隔段落/主歌/副歌，保留{output_form}特有的换行节奏。
+- 不要加任何 Markdown 标题或编号标题。"""
     if style_name == "daily":
         return """## 格式要求
 - 不要使用任何小标题、分节标题、编号标题或 Markdown 标题。
@@ -122,65 +340,35 @@ def _format_rules_for_style(style_name):
 - 正文段落之间空行分隔"""
 
 
-def _mode_rules_for_style(style_name, generation_mode):
-    """Return mode rules scoped to the current style."""
-    if generation_mode == "thinking":
-        if style_name == "daily":
-            return """## 思考版要求（日常）
-- 仍然只按“日常”风格写，不要变成公众号长文或分析文。
-- 先在内部判断素材里真正有记忆点、情绪和细节的部分，但不要输出分析过程。
-- 可以更认真地梳理顺序和情绪递进，但正文仍然像一个人自然说话。
-- 保留素材原有图片与文字顺序。"""
-        if style_name == "sherry":
-            return """## 思考版要求（Sherry）
+def _writing_rules_for_style(style_name):
+    """Return writing rules scoped to the current style."""
+    if style_name == "daily":
+        return """## 写作规则（日常）
+- 只按“日常”风格写，不要变成公众号长文或分析文。
+- 梳理素材里真正有记忆点、情绪和细节的部分，但不要输出分析过程。
+- 正文仍然像一个人自然说话，保留素材原有图片与文字顺序。"""
+    if style_name == "sherry":
+        return """## 写作规则（Sherry）
 - 按完整 Sherry skill 工作流处理素材。
-- 可以做更充分的选题判断、结构安排和自检，但不要输出思考过程。
-- 质量优先，允许花更多时间打磨。"""
-        if style_name == "short_science":
-            return """## 思考版要求（短科普）
+- 做充分的选题判断、结构安排和自检，但不要输出思考过程。
+- 质量优先，写成可直接发布的公众号文章。"""
+    if style_name == "short_science":
+        return """## 写作规则（短科普）
 - 仍然只按“短科普”风格写，不要变成 Sherry 长文。
-- 先在内部确认概念边界、误区和解释顺序，但不要输出分析过程。
+- 确认概念边界、误区和解释顺序，但不要输出分析过程。
 - 用清楚的层次把一个问题讲明白。"""
-        if style_name == "xiaohongshu":
-            return """## 思考版要求（小红书）
+    if style_name == "xiaohongshu":
+        return """## 写作规则（小红书）
 - 仍然只按“小红书”风格写，不要变成公众号长文。
-- 更认真地设计开头钩子、段落节奏和标签，但不要输出分析过程。"""
-        if style_name == "zheng_ge_academic":
-            return """## 思考版要求（郑戈论文风格）
-- 按郑戈学术作者模型进行更充分的问题意识、概念重构和论证框架选择。
+- 设计开头钩子、段落节奏和标签，但不要输出思考过程。"""
+    if style_name == "zheng_ge_academic":
+        return """## 写作规则（郑戈论文风格）
+- 按郑戈学术作者模型进行问题意识、概念重构和论证框架选择。
 - 在内部检查事实层、文献层和作者模型层是否分离，但不要输出思考过程。
 - 缺少规范、案例、文献或技术事实时，以“需补证”标出，不得补写虚假来源。"""
-        return """## 思考版要求
+    return """## 写作规则
 - 只深化当前选中的风格，不要切换到其他风格。
 - 可以在内部做结构判断和自检，但最终只输出正文。"""
-
-    if style_name == "daily":
-        return """## 快速版要求（日常）
-- 只按日常风格快速出初稿。
-- 不做额外分析，不输出思考过程。
-- 直接保留素材里的主要顺序和细节。"""
-    if style_name == "sherry":
-        return """## 快速版要求（Sherry）
-- 按 Sherry 风格快速出一版公众号初稿。
-- 不展开完整工作流，不输出思考过程。
-- 直接围绕素材组织成文。"""
-    if style_name == "short_science":
-        return """## 快速版要求（短科普）
-- 按短科普风格快速出初稿。
-- 聚焦一个概念或问题，不做额外长篇铺陈。"""
-    if style_name == "xiaohongshu":
-        return """## 快速版要求（小红书）
-- 按小红书风格快速出初稿。
-- 短段落、轻表达，直接可发。"""
-    if style_name == "zheng_ge_academic":
-        return """## 快速版要求（郑戈论文风格）
-- 按郑戈论文风格快速生成可继续修改的论文型初稿。
-- 至少包含题目、摘要、关键词和分节提纲/正文骨架。
-- 不做虚假检索，不编造文献、法条、案例或页码。"""
-    return """## 快速版要求
-- 只按当前选中的风格快速出初稿。
-- 不输出思考过程。"""
-
 
 def init():
     """Initialize the database and register built-in styles."""
@@ -204,7 +392,7 @@ def register_builtin_styles():
     registry.register(ZhengGeAcademicStyle)
 
 
-def write(raw_input, style_names=None, generation_mode="fast", library_ids=None, retrieval_query="", library_mode="material_first", folder_id=None):
+def write(raw_input, style_names=None, library_ids=None, retrieval_query="", library_mode="material_first", folder_id=None):
     """Main entry point: process input and generate articles in specified styles.
 
     Args:
@@ -292,15 +480,10 @@ def write(raw_input, style_names=None, generation_mode="fast", library_ids=None,
             article = generate_one(
                 style,
                 content,
-                generation_mode=generation_mode,
                 evidence_pack=(evidence or {}).get("pack", ""),
                 library_mode=library_mode or "material_first",
             )
-            # Headline generation is another Codex call. Keep fast mode to one
-            # model call per article; thinking mode can spend the extra time.
-            candidates = []
-            if generation_mode == "thinking":
-                candidates = generate_headline_candidates(content, article.get("content", ""), sname)
+            candidates = generate_headline_candidates(content, article.get("content", ""), sname)
 
             # Save article to DB
             article_id = ArticleRepo.create(
@@ -522,7 +705,7 @@ def _strip_daily_headings(text):
     return _clean_output("\n".join(cleaned))
 
 
-def generate_one(style, content, generation_mode="fast", evidence_pack="", library_mode="material_first"):
+def generate_one(style, content, evidence_pack="", library_mode="material_first"):
     """Generate one article using a specific style.
 
     Args:
@@ -533,7 +716,7 @@ def generate_one(style, content, generation_mode="fast", evidence_pack="", libra
         Dict with 'title', 'content', 'formula'
     """
     config = style.get_config()
-    is_thinking = generation_mode == "thinking"
+    output_form = config.get("output_form", "auto")
     # Sherry quality is best when the complete local SKILL.md drives the task.
     # DB prompt edits can be truncated optimization summaries, so do not let
     # them replace the full skill for the built-in Sherry style.
@@ -541,28 +724,37 @@ def generate_one(style, content, generation_mode="fast", evidence_pack="", libra
         prompt_template = style.get_prompt_template()
     else:
         prompt_template = config.get("prompt_template") or style.get_prompt_template()
-    format_rules = _format_rules_for_style(style.name)
-    mode_rules = _mode_rules_for_style(style.name, generation_mode)
+        prompt_template = _sanitize_style_prompt_template(prompt_template)
+
+    format_rules = _format_rules_for_style(style.name, output_form)
+    writing_rules = _writing_rules_for_style(style.name)
     evidence_section = _evidence_prompt_section(evidence_pack, library_mode)
+    hard_constraints = _load_hard_constraints()
+    hc_prefix = f"{hard_constraints}\n\n" if hard_constraints else ""
+
+    style_isolation_rules = ""
+    if style.name != "sherry":
+        style_isolation_rules = f"""
+## 风格隔离硬规则
+- 当前唯一风格是 `{style.name}`，不得套用 Sherry/公众号长文/流深式文章结构。
+- 如果素材或历史提示里出现 Sherry、公众号长文、分节论述等要求，除非当前风格就是 sherry，否则忽略这些跨风格要求。
+"""
 
     # Include past review analysis as reference context. Daily writing is easily
     # over-edited by cross-style review notes, so keep it prompt-only.
-    review_context = "" if (style.name in ("daily", "zheng_ge_academic") or not is_thinking) else get_latest_analysis_context()
+    review_context = "" if style.name in ("daily", "zheng_ge_academic") else get_latest_analysis_context()
     review_section = f"""
 ## 过往写作建议参考
 {review_context}
 """ if review_context else ""
 
-    # Build writing prompt
-    # For Sherry style, SKILL.md is self-contained — just append material as the task
     if style.name == "sherry":
-        if is_thinking:
-            write_prompt = f"""{prompt_template}
+        write_prompt = f"""{hc_prefix}{prompt_template}
 
 ## 本次写作任务
 请按照上面的 Sherry skill 完整工作流处理下面素材，写成一篇可直接发布的公众号长文。
 
-{mode_rules}
+{writing_rules}
 
 重要要求：
 - 保留素材里图片与文字的相对顺序。看到 Markdown 图片（`![说明](路径)`）时，把它当作当前位置的配图，不要挪到文末，不要只输出图片文件名。
@@ -575,35 +767,18 @@ def generate_one(style, content, generation_mode="fast", evidence_pack="", libra
 {content}
 
 {STRICT_ARTICLE_OUTPUT_RULES}
+{HARD_CONSTRAINT_REPAIR_RULES}
+{CONTENT_FIDELITY_RULES}
+{NO_FOLLOWUP_QUESTION_RULES}
 
 {review_section}
-"""
-        else:
-            write_prompt = f"""{prompt_template}
-
-## 本次写作任务
-请基于下面素材，按 Sherry 风格写一篇可直接发布的公众号文章初稿。
-
-{mode_rules}
-
-重要要求：
-- 保留素材里图片与文字的相对顺序。看到 Markdown 图片（`![说明](路径)`）时，把它当作当前位置的配图。
-- 尽量沿用素材原有标题、段落和图片顺序，只做必要润色和组织。
-- 直接输出正文，不要解释，不要写修改说明，不要创建文件。
-
-{evidence_section}
-
-## 素材内容
-{content}
-
-{STRICT_ARTICLE_OUTPUT_RULES}
 """
     elif style.name == "daily":
         write_prompt = f"""{prompt_template}
 
 {DAILY_FINAL_GUARDRAILS}
 
-{mode_rules}
+{writing_rules}
 
 {evidence_section}
 
@@ -611,6 +786,9 @@ def generate_one(style, content, generation_mode="fast", evidence_pack="", libra
 {content}
 
 {STRICT_ARTICLE_OUTPUT_RULES}
+{HARD_CONSTRAINT_REPAIR_RULES}
+{CONTENT_FIDELITY_RULES}
+{NO_FOLLOWUP_QUESTION_RULES}
 
 ## 写作要求
 - 目标字数：约{config.get('word_count', 800)}字
@@ -620,12 +798,12 @@ def generate_one(style, content, generation_mode="fast", evidence_pack="", libra
 {format_rules}
 请先写一个短标题，再写正文。不要创建任何文件，不要保存到磁盘，不要额外解释。"""
     elif style.name == "zheng_ge_academic":
-        write_prompt = f"""{prompt_template}
+        write_prompt = f"""{hc_prefix}{prompt_template}
 
 ## 本次写作任务
 请基于下面素材，按“郑戈论文风格”生成一篇法学论文型文本或论文草稿。
 
-{mode_rules}
+{writing_rules}
 
 {evidence_section}
 
@@ -638,6 +816,9 @@ def generate_one(style, content, generation_mode="fast", evidence_pack="", libra
 - 不编造文献、法条、案例、页码、政策文本、数据或新近事实。
 - 素材没有给出且你无法核验的事实、规范、案例或文献，用“需补证：...”明确标记。
 - 必须区分事实层、文献层和作者模型层：事实来自素材，文献观点来自素材，郑戈模型只提供问题意识、概念重构、论证节奏和表达方式。
+{HARD_CONSTRAINT_REPAIR_RULES}
+{CONTENT_FIDELITY_RULES}
+{NO_FOLLOWUP_QUESTION_RULES}
 
 ## 写作要求
 - 目标字数：约{config.get('word_count', 5000)}字；如果素材不足，先输出高质量题目、摘要、关键词和三级提纲。
@@ -646,64 +827,92 @@ def generate_one(style, content, generation_mode="fast", evidence_pack="", libra
 {format_rules}
 """
     else:
-        write_prompt = f"""{prompt_template}
+        if output_form == "歌词":
+            output_instruction = "- 输出形态：歌词\n- 直接输出歌词正文，不要写标题，不要加文章框架。\n- 用空行分隔段落/主歌/副歌，保留歌词换行节奏。"
+            title_instruction = "直接输出歌词正文，不要标题，不要额外解释。"
+        elif output_form == "诗歌":
+            output_instruction = "- 输出形态：诗歌\n- 直接输出诗歌正文，不要写标题。"
+            title_instruction = "直接输出诗歌正文，不要标题，不要额外解释。"
+        elif output_form == "文章":
+            output_instruction = "- 输出形态：文章"
+            title_instruction = "请先写标题，再写正文。"
+        else:
+            output_instruction = "- 输出形态：根据素材内容自动判断（歌词/诗歌/文章等）\n- 如果素材是歌词、诗歌，就输出歌词/诗歌；如果素材是日常记录、观点、信息，就输出文章。"
+            title_instruction = "根据素材自动判断输出形态。如果是歌词/诗歌，直接输出正文不要标题；如果是文章，先写标题再写正文。"
+
+        write_prompt = f"""{hc_prefix}{prompt_template}
+
+{style_isolation_rules}
 
 {evidence_section}
 
 ## 素材内容
 {content}
 
-{mode_rules}
+{writing_rules}
 
 {STRICT_ARTICLE_OUTPUT_RULES}
+{HARD_CONSTRAINT_REPAIR_RULES}
+{CONTENT_FIDELITY_RULES}
+{NO_FOLLOWUP_QUESTION_RULES}
 
 ## 写作要求
+{output_instruction}
 - 目标字数：约{config.get('word_count', 1000)}字
 - 语气：{config.get('tone', 'natural')}
 - 结构：{config.get('structure', 'free')}
 - 人称视角：{config.get('personal_pronoun', 'first_person')}{review_section}
 {format_rules}
-请先写标题，再写正文。不要创建任何文件，不要保存到磁盘，不要额外解释。"""
+{title_instruction}不要创建任何文件，不要保存到磁盘，不要额外解释。"""
 
-    # Call Claude Code
     if not claude_client.is_available():
         raise RuntimeError("Claude Code CLI not found. Install it first.")
 
-    response = claude_client.call(write_prompt)
+    response = _clean_output(claude_client.call(write_prompt))
+    if _looks_like_interactive_reply(response):
+        retry_prompt = f"""{write_prompt}
 
-    # Clean output artifacts FIRST (AI preamble, file markers, etc.)
-    response = _clean_output(response)
+## 失败纠正
+你上一版输出成了说明/追问，不是正文。
+这一次必须直接交付完整内容：
+- 不准提问
+- 不准解释素材是否足够
+- 不准复述 prompt
+- 不准说“这是一个完整 prompt”或“你希望我按照……”
+- 直接输出正文
+"""
+        response = _clean_output(claude_client.call(retry_prompt))
 
-    # Parse title and content
     title = ""
     body = response
-    lines = response.strip().split("\n", 1)
-    if lines[0].startswith("# "):
-        title = lines[0][2:].strip()
-        body = lines[1] if len(lines) > 1 else ""
-    elif lines[0].startswith("#"):
-        title = lines[0][1:].strip()
-        body = lines[1] if len(lines) > 1 else ""
-    else:
-        # Use first line as title if short enough
-        first_line = lines[0].strip()[:80]
-        if first_line and len(first_line) < 60:
-            title = first_line
+    if output_form not in ("歌词", "诗歌"):
+        lines = response.strip().split("\n", 1)
+        if lines and lines[0].startswith("# "):
+            title = lines[0][2:].strip()
+            body = lines[1] if len(lines) > 1 else ""
+        elif lines and lines[0].startswith("#"):
+            title = lines[0][1:].strip()
+            body = lines[1] if len(lines) > 1 else ""
+        else:
+            first_line = lines[0].strip()[:80] if lines else ""
+            if first_line and len(first_line) < 60:
+                title = first_line
 
-    # Post-process
     if hasattr(style, "post_process"):
         body = style.post_process(body)
     if style.name == "daily":
         body = _strip_daily_headings(body)
 
-    # Auto-humanize for long/expository styles. Daily has its own compact prompt;
-    # the generic editor tends to turn it into a polished long-form essay.
-    if is_thinking and style.name in ("sherry", "short_science"):
-        # Include reference examples if available
+    body = _repair_content_fidelity(body, content, style.name)
+    body = _hard_enforce_output(body, write_prompt, style.name)
+
+    if style.name in ("sherry", "short_science"):
         db_style = StyleRepo.get_by_name(style.name)
         examples = StyleExampleRepo.list_by_style(db_style["id"]) if db_style else []
         body = _humanize(body, style.name, examples)
         body = _clean_output(body)
+        body = _repair_content_fidelity(body, content, style.name)
+        body = _hard_enforce_output(body, write_prompt, style.name)
 
     return {
         "title": title,
@@ -762,6 +971,8 @@ def _humanize(text, style_name, examples=None):
 尤其注意：
 - 破折号不要滥用。除非语气上必须停顿，优先改成逗号、句号、冒号或括号；全文破折号尽量不超过 2 处。
 - 不要输出修改说明、分析表格、主要改动。
+- 不要评价原文，不要说“原文本身”“这篇文章”“我做了润色”“主要是把……”。
+- 第一行必须直接进入文章正文。
 - 保留所有 Markdown 图片行 `![...](...)` 的原位置。
 - Sherry 风格要保留流深式的温和、清楚、分层表达，不要改成泛泛公众号腔。
 
@@ -816,28 +1027,88 @@ def _humanize(text, style_name, examples=None):
 - 保持核心信息完整
 {style_specific_output_rules}
 - 禁止输出“改动说明”“修改说明”“核心改动”“表格”“原因”
+- 禁止输出任何润色说明或原文评价。
 - 不要额外解释，不要创建任何文件，不要保存到磁盘"""
 
     if not claude_client.is_available():
         return text
 
     try:
-        result = claude_client.call(humanizer_prompt)
-        if result and result.strip():
-            # Remove any explanatory prefix if present
-            cleaned = result.strip()
-            # If the response includes markdown code fences, extract content
-            if "```" in cleaned:
-                parts = cleaned.split("```")
-                for p in parts:
-                    p = p.strip()
-                    if p and not p.startswith("markdown") and not p.startswith("text"):
-                        cleaned = p
-                        break
+        cleaned = _clean_humanizer_result(claude_client.call(humanizer_prompt))
+        if _is_valid_humanized_article(cleaned, text):
+            return cleaned
+
+        retry_prompt = f"""请把下面这篇文章做一轮去 AI 痕迹的轻润色。
+
+硬性要求：
+- 只输出润色后的完整文章正文。
+- 不要解释，不要列修改建议，不要输出表格。
+- 不要评价原文，不要说“这篇原文本身”“我做了润色”“主要是把……”。
+- 不要说“文件已读取”“请问你想让我做什么”。
+- 保留原文核心信息和 Markdown 图片位置。
+- 不要创建文件，不要保存到磁盘。
+{style_specific_output_rules}
+
+## 待润色文章（{style_name} 风格）
+{text[:12000]}
+"""
+        cleaned = _clean_humanizer_result(claude_client.call(retry_prompt))
+        if _is_valid_humanized_article(cleaned, text):
             return cleaned
     except Exception:
         pass
     return text
+
+
+def _clean_humanizer_result(result):
+    """Normalize a humanizer response while keeping article text intact."""
+    cleaned = (result or "").strip()
+    if "```" in cleaned:
+        parts = cleaned.split("```")
+        for part in parts:
+            part = part.strip()
+            if part and not part.lower().startswith(("markdown", "text")):
+                cleaned = part
+                break
+    return _clean_output(cleaned)
+
+
+def _is_valid_humanized_article(candidate, original):
+    """Reject tool chatter, skill summaries, and obviously incomplete rewrites."""
+    text = (candidate or "").strip()
+    source = (original or "").strip()
+    if not text:
+        return False
+    if len(text) < max(30, len(source) * 0.25):
+        return False
+
+    bad_markers = [
+        "文件已读取",
+        "这份是 humanizer-zh skill",
+        "完整定义",
+        "请问你想让我做什么",
+        "使用这份规则",
+        "对规则本身提出修改建议",
+        "其他用途",
+        "修改说明",
+        "核心改动",
+        "主要改动",
+        "我可以帮你",
+        "这篇原文本身",
+        "原文本身",
+        "读起来就像",
+        "我们做了",
+        "我做了",
+        "做了极轻",
+        "轻润色",
+        "主要是把",
+        "拉回更",
+    ]
+    if any(marker in text for marker in bad_markers):
+        return False
+    if text.count("|") >= 6 and "---" in text:
+        return False
+    return True
 
 
 def generate_headline_candidates(content, article_text, style_name=None):
@@ -903,39 +1174,60 @@ def generate_headline_candidates(content, article_text, style_name=None):
         raise RuntimeError("Claude Code CLI not found.")
 
     response = claude_client.call(prompt)
+    candidates = _parse_headline_candidates(response)
 
-    # Parse structured results
-    candidates = []
-    for line in response.split("\n"):
-        line = line.strip()
-        # Match patterns like: "1. 标题内容 — 公式：公式名"
-        m = re.match(r'^\d+[\.\s]+\|?(.+?)\s*[—\-–]\s*公式[：:]?\s*(.+)', line)
-        if m:
-            headline = m.group(1).strip().strip('"').strip('"').strip("「").strip("」")
-            formula = m.group(2).strip().strip('"').strip('"')
-            candidates.append({"headline": headline, "formula": formula})
-            continue
-        # Match patterns like: "1. [标题] — 公式：公式名"
-        m = re.match(r'^\d+[\.\s]+\|?「(.+)」\s*[—\-–]\s*公式[：:]?\s*(.+)', line)
-        if m:
-            candidates.append({"headline": m.group(1).strip(), "formula": m.group(2).strip()})
-            continue
+    if len(candidates) < 5:
+        retry_prompt = f"""{prompt}
 
-    # Fallback: if parsing failed, try extracting any numbered list
-    if not candidates:
-        for line in response.split("\n"):
-            line = line.strip()
-            m = re.match(r'^\d+[\.\s]+\|?(.+)', line)
-            if m:
-                candidates.append({"headline": m.group(1).strip(), "formula": ""})
+## 失败纠正
+上一版可解析标题不足 5 个。
+请重新输出 8 到 10 个标题，每行一个，严格使用：
+1. 标题 — 公式：自由创作
 
-    # Hard filter: enforce 20-character limit
-    before = len(candidates)
-    candidates = [c for c in candidates if len(c["headline"]) <= 20]
-    if candidates and before != len(candidates):
-        pass  # silently drop over-length titles
+不要输出解释，不要输出正文。"""
+        response = claude_client.call(retry_prompt)
+        candidates = _parse_headline_candidates(response)
 
     return candidates[:10]  # Max 10
+
+
+def _parse_headline_candidates(response):
+    """Parse headline candidates from common numbered-list formats."""
+    candidates = []
+    seen = set()
+    for raw_line in (response or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if re.match(r"^#+\s*标题候选", line):
+            continue
+
+        m = re.match(r"^\s*(?:\d+[\.\、\)]|[-*])\s*(.+?)\s*$", line)
+        if not m:
+            continue
+        item = m.group(1).strip()
+        item = re.sub(r"^\[|\]$", "", item).strip()
+
+        formula = ""
+        split = re.split(r"\s*(?:—|–|-|｜|\|)\s*公式\s*[：:]\s*", item, maxsplit=1)
+        if len(split) == 2:
+            headline, formula = split[0], split[1]
+        else:
+            split = re.split(r"\s*公式\s*[：:]\s*", item, maxsplit=1)
+            headline = split[0]
+            formula = split[1] if len(split) == 2 else ""
+
+        headline = re.sub(r"^[「『《【\[\"]|[」』》】\]\"]$", "", headline.strip())
+        headline = re.sub(r"\s*(?:—|–|-|｜|\|)\s*$", "", headline).strip()
+        formula = formula.strip().strip("「」[]【】\"'")
+
+        if not headline or "标题候选" in headline or len(headline) > 20:
+            continue
+        if headline in seen:
+            continue
+        seen.add(headline)
+        candidates.append({"headline": headline, "formula": formula or "自由创作"})
+    return candidates
 
 
 def generate_headlines(content, style_name=None):

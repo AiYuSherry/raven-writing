@@ -327,9 +327,6 @@ def create_app():
             except Exception:
                 file_payloads = []
             file_path = request.form.get("file_path", "").strip()
-            generation_mode = request.form.get("generation_mode", "fast").strip()
-            if generation_mode not in ("fast", "thinking"):
-                generation_mode = "fast"
             selected_libraries = [int(x) for x in request.form.getlist("library_ids") if str(x).strip()]
             selected_folder_id = request.form.get("library_folder_id", "").strip()
             retrieval_query = request.form.get("retrieval_query", "").strip()
@@ -367,7 +364,6 @@ def create_app():
                     result = pipeline.write(
                         generation_content,
                         selected,
-                        generation_mode=generation_mode,
                         library_ids=selected_libraries,
                         folder_id=selected_folder_id,
                         retrieval_query=retrieval_query,
