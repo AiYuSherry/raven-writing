@@ -119,6 +119,10 @@
         .nav-icon { width: 18px; height: 18px; flex-shrink: 0; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; opacity: 0.9; }
         .sidebar-sessions { flex: 1; min-height: 0; padding: 12px; overflow-y: auto; }
         .sidebar-sessions .title { font-size: 11px; color: var(--muted); font-weight: 500; letter-spacing: 0; margin-bottom: 8px; padding: 0 10px; }
+        .sidebar-sessions .title-row { display: flex; align-items: center; justify-content: space-between; padding: 0 10px; margin-bottom: 8px; }
+        .sidebar-sessions .title-row .title { margin-bottom: 0; padding: 0; }
+        .sidebar-sessions .toggle-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 4px; opacity: 0.72; transition: opacity 0.15s, background 0.15s; line-height: 1; }
+        .sidebar-sessions .toggle-btn:hover { opacity: 1; background: var(--sidebar-hover); }
         .session-item { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: start; padding: 9px 8px 9px 10px; border-radius: 8px; margin-bottom: 2px; transition: background 0.15s, color 0.15s; }
         .session-item:hover { background: var(--sidebar-hover); }
         .session-link { min-width: 0; color: var(--ink-soft); text-decoration: none; font-size: 13px; font-weight: 400; }
@@ -395,7 +399,11 @@
                 </a>
             </nav>
             <div class="sidebar-sessions">
-                <div class="title">最近任务</div>
+                <div class="title-row">
+                    <div class="title">最近任务</div>
+                    <button class="toggle-btn" id="sessionToggle" type="button" onclick="toggleSessions()" title="隐藏/显示最近任务">隐藏</button>
+                </div>
+                <div id="sessionList">
                 {% for s in sidebar_sessions %}
                 <div class="session-item" id="sidebar-session-{{ s.id }}">
                     <a class="session-link" href="/session/{{ s.id }}">
@@ -409,6 +417,7 @@
                     </div>
                 </div>
                 {% endfor %}
+                </div>
             </div>
             <div class="sidebar-footer">
                 <a href="/settings" {% if request.path == '/settings' %}class="current"{% endif %}>
@@ -440,6 +449,24 @@
     function toggleSidebar() {
         document.getElementById('sidebar').classList.toggle('open');
     }
+
+    function toggleSessions() {
+        const list = document.getElementById('sessionList');
+        const btn = document.getElementById('sessionToggle');
+        if (!list || !btn) return;
+        const hidden = list.style.display === 'none';
+        list.style.display = hidden ? '' : 'none';
+        btn.textContent = hidden ? '隐藏' : '显示';
+        localStorage.setItem('sessionListHidden', hidden ? '' : '1');
+    }
+    (function() {
+        const list = document.getElementById('sessionList');
+        const btn = document.getElementById('sessionToggle');
+        if (list && btn && localStorage.getItem('sessionListHidden') === '1') {
+            list.style.display = 'none';
+            btn.textContent = '显示';
+        }
+    })();
 
     function renameSession(event, sessionId) {
         event.preventDefault();
