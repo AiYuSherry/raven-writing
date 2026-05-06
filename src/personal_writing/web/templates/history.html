@@ -36,39 +36,52 @@
             <div style="font-size:16px;font-weight:600;margin-bottom:2px;">{{ m._display_title or '(无标题)' }}</div>
             <div class="meta">#{{ m.id }} · {{ m.source_type }} · {{ m.created_at }}</div>
         </div>
-        <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px;color:#c00;border-color:#ecc;flex-shrink:0;margin-left:8px;" onclick="deleteMaterial({{ m.id }})">删除</button>
-    </div>
-    <div style="margin:8px 0;font-size:13px;color:#555;line-height:1.6;background:#fafafa;padding:10px;border-radius:6px;">
-        {{ m.raw_content[:300] }}{% if m.raw_content|length > 300 %}...{% endif %}
-    </div>
-    {% for s in sessions_by_material.get(m.id, []) %}
-    <div style="margin-top:8px;padding:10px 12px;background:#f8f8f8;border-radius:6px;border-left:3px solid #333;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-            <span style="font-size:13px;font-weight:500;">批次 #{{ s.id }}</span>
-            <span style="font-size:12px;color:#888;">{{ s.created_at }}</span>
+        <div style="display:flex;gap:6px;flex-shrink:0;margin-left:8px;">
+            <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px;" onclick="toggleHistoryDetail({{ m.id }}, this)">隐藏</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px;color:#c00;border-color:#ecc;" onclick="deleteMaterial({{ m.id }})">删除</button>
         </div>
-        <div style="font-size:12px;color:#888;margin-bottom:6px;">风格: {{ s.style_names }}</div>
-        {% for article in articles_by_session.get(s.id, []) %}
-        <div style="padding:8px 10px;background:#fff;border-radius:4px;margin-top:4px;border:1px solid #eee;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-                <div>
-                    <span class="tag">{{ article.style }}</span>
-                    <span style="font-size:13px;margin-left:4px;">{{ article.title or article.headline_selected or '(无标题)' }}</span>
+    </div>
+    <div id="history-detail-{{ m.id }}">
+        <div style="margin:8px 0;font-size:13px;color:#555;line-height:1.6;background:#fafafa;padding:10px;border-radius:6px;">
+            {{ m.raw_content[:300] }}{% if m.raw_content|length > 300 %}...{% endif %}
+        </div>
+        {% for s in sessions_by_material.get(m.id, []) %}
+        <div style="margin-top:8px;padding:10px 12px;background:#f8f8f8;border-radius:6px;border-left:3px solid #333;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <span style="font-size:13px;font-weight:500;">批次 #{{ s.id }}</span>
+                <span style="font-size:12px;color:#888;">{{ s.created_at }}</span>
+            </div>
+            <div style="font-size:12px;color:#888;margin-bottom:6px;">风格: {{ s.style_names }}</div>
+            {% for article in articles_by_session.get(s.id, []) %}
+            <div style="padding:8px 10px;background:#fff;border-radius:4px;margin-top:4px;border:1px solid #eee;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <span class="tag">{{ article.style }}</span>
+                        <span style="font-size:13px;margin-left:4px;">{{ article.title or article.headline_selected or '(无标题)' }}</span>
+                    </div>
+                    <a href="/session/{{ s.id }}" class="btn btn-secondary" style="font-size:12px;padding:3px 10px;text-decoration:none;">查看</a>
                 </div>
-                <a href="/session/{{ s.id }}" class="btn btn-secondary" style="font-size:12px;padding:3px 10px;text-decoration:none;">查看</a>
+                <div style="font-size:13px;color:#444;margin-top:4px;line-height:1.6;max-height:60px;overflow:hidden;">
+                    {{ article.content[:200]|strip_md }}{% if article.content|length > 200 %}...{% endif %}
+                </div>
             </div>
-            <div style="font-size:13px;color:#444;margin-top:4px;line-height:1.6;max-height:60px;overflow:hidden;">
-                {{ article.content[:200]|strip_md }}{% if article.content|length > 200 %}...{% endif %}
-            </div>
+            {% endfor %}
         </div>
         {% endfor %}
     </div>
-    {% endfor %}
 </div>
 {% endfor %}
 {% endif %}
 
 <script>
+function toggleHistoryDetail(id, btn) {
+    const el = document.getElementById('history-detail-' + id);
+    if (!el) return;
+    const hidden = el.style.display === 'none';
+    el.style.display = hidden ? 'block' : 'none';
+    if (btn) btn.textContent = hidden ? '隐藏' : '显示';
+}
+
 function deleteMaterial(id) {
     if (!confirm('确定删除这条素材及其所有文章？')) return;
     fetch('/api/v1/material/' + id, {method: 'DELETE'})
