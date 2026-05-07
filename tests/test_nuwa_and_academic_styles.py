@@ -32,6 +32,67 @@ class NuwaDistillerTests(unittest.TestCase):
         self.assertEqual(bundle["skill_name"], "plain-skill")
         self.assertEqual(bundle["files"][0]["path"], "SKILL.md")
 
+    def test_draft_style_prompt_can_be_generated_from_examples(self):
+        from personal_writing.web.app import create_app
+
+        captured = {}
+
+        def fake_claude(prompt):
+            captured["prompt"] = prompt
+            return """# 教程写作风格
+
+## 核心价值观
+具体、可操作。
+
+## 素材理解与选题判断
+先找步骤。
+
+## 输出形态（文章/歌词/诗歌等）
+文章。
+
+## 语言风格
+短句。
+
+## 结构特征
+分步骤。
+
+## 具体细节的使用
+保留动作。
+
+## 情绪表达方式
+克制。
+
+## 节奏与段落
+一段一事。
+
+## 推荐表达
+直接说做法。
+
+## 绝对禁区
+不要空泛。
+
+## 输出要求
+只输出正文。"""
+
+        app = create_app()
+        app.config["TESTING"] = True
+        client = app.test_client()
+        with patch("personal_writing.web.app.claude_call", side_effect=fake_claude):
+            response = client.post("/api/v1/styles/draft-optimize", json={
+                "display_name": "教程",
+                "description": "操作性强",
+                "examples": [{
+                    "title": "示例",
+                    "content": "第一步打开项目。第二步找到按钮。第三步保存。",
+                }],
+            })
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["status"], "ok")
+        self.assertIn("# 教程写作风格", data["prompt_template"])
+        self.assertIn("第一步打开项目", captured["prompt"])
+
 
 class AcademicStyleTests(unittest.TestCase):
     def test_zheng_ge_style_metadata(self):

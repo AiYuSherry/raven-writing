@@ -290,6 +290,29 @@ def _load_humanizer_skill():
     return ""
 
 
+def _compact_humanizer_skill(text, limit=1000):
+    """Keep only the useful front matter of humanizer-zh for fast runtime calls."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    keep = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            if keep and keep[-1]:
+                keep.append("")
+            continue
+        if stripped.startswith(("#", "-", "*")) or re.match(r"^\d+[.、)]", stripped):
+            keep.append(stripped)
+        elif any(key in stripped for key in ("AI", "破折号", "公式", "人味", "自然", "输出", "禁止")):
+            keep.append(stripped)
+        if sum(len(x) + 1 for x in keep) >= limit:
+            keep.pop()
+            break
+    compact = "\n".join(keep).strip()
+    return compact
+
+
 _HARDCACHE = None
 
 
@@ -936,22 +959,18 @@ def _humanize(text, style_name, examples=None):
         Polished text
     """
 
-    # Build reference examples section if available
+    # Keep humanize fast: one short style sample is enough for tone anchoring.
     ref_section = ""
     if examples:
         ref_parts = []
-        for i, ex in enumerate(examples[:3], 1):  # Max 3 examples
+        for i, ex in enumerate(examples[:1], 1):
             ex_title = ex.get("title", "") or f"参考{i}"
-            ex_content = ex["content"][:1500]
+            ex_content = ex["content"][:160]
             ref_parts.append(f"### {ex_title}\n{ex_content}")
         if ref_parts:
             ref_section = f"""
-## 你的写作风格参考（请模仿以下示例的语感和用词）
-
-下面是你自己写的文章，请仔细分析模仿其中的语言风格、节奏和用词习惯，让润色后的文字听起来更像你本人写的：
-
+## 风格参考
 {"".join(ref_parts)}
-
 """
 
     style_specific_output_rules = ""
@@ -963,64 +982,22 @@ def _humanize(text, style_name, examples=None):
     else:
         style_specific_output_rules = "- 保留原有 Markdown 标题层级，尤其是 `#`、`##`、`###`"
 
-    humanizer_skill = _load_humanizer_skill()
+    humanizer_skill = _compact_humanizer_skill(_load_humanizer_skill())
     humanizer_prompt = f"""{humanizer_skill}
 
-## 本次任务补充
-你现在只做“去 AI 痕迹的轻润色”，不要重写选题，不要改变文章结构，不要挪动 Markdown 图片位置。
-尤其注意：
-- 破折号不要滥用。除非语气上必须停顿，优先改成逗号、句号、冒号或括号；全文破折号尽量不超过 2 处。
-- 不要输出修改说明、分析表格、主要改动。
-- 不要评价原文，不要说“原文本身”“这篇文章”“我做了润色”“主要是把……”。
-- 第一行必须直接进入文章正文。
-- 保留所有 Markdown 图片行 `![...](...)` 的原位置。
-- Sherry 风格要保留流深式的温和、清楚、分层表达，不要改成泛泛公众号腔。
+## 任务
+对文章做一轮去 AI 痕迹的轻润色。只改语气和句法，不重写选题，不扩写新事实，不改结构，不移动图片。
 
-下面是旧版内置规则，仍可参考：
-
-你是一位文字编辑，专门识别和去除 AI 生成文本的痕迹，使文字听起来更自然、更有人味。
-
-## 核心原则
-
-1. **删除填充短语** - 去除开场白和强调性拐杖词
-2. **打破公式结构** - 避免二元对比、戏剧性分段、修辞性设置
-3. **变化节奏** - 混合句子长度。两项优于三项。段落结尾要多样化
-4. **信任读者** - 直接陈述事实，跳过软化、辩解和手把手引导
-5. **删除金句** - 如果听起来像可引用的语句，重写它
-
-## 需要检测和修复的模式
-
-1. **过度强调意义** - 删除"标志着""见证了""是……的体现""至关重要""关键作用""不断演变的格局"等词汇
-2. **宣传广告式语言** - 删除"充满活力的""深刻的""开创性的""令人叹为观止的""必游之地"等
-3. **模糊归因** - 删除"行业报告显示""专家认为""一些批评者认为"等无具体来源的归因
-4. **AI 高频词汇** - 删除"此外""与……保持一致""深入探讨""持久的""格局""复杂/复杂性""关键性的"等
-5. **系动词回避** - 将"作为/代表/标志着/充当"替换为"是/有"
-6. **否定式排比** - 避免"不仅……而且……""这不仅仅是……而是……"
-7. **三段式法则** - 避免强行将想法分成三组；改为两项或四项
-8. **破折号过度使用** - 减少破折号使用频率
-9. **填充短语** - "为了实现这一目标"→"为了实现"，"值得注意的是"→删除
-10. **过度限定** - "可以潜在地可能被认为"→"可能会"
-11. **通用积极结论** - 删除模糊的乐观结尾，用具体事实替代
-12. **以-ing结尾的肤浅分析** - 删除"突出/强调/彰显……""确保……""反映/象征……"
-13. **表情符号** - 删除或减少表情符号使用
-14. **协作交流痕迹** - 删除"希望这对您有帮助""当然！"等对话痕迹
-15. **日积月累式总结** - 删除"单个看不算什么，但日积月累……"这类强行升华的公式
-16. **否定式定义** - 删除"不是那种……的……"句式，直接说是什么
-17. **模板化结尾** - 删除"如果你也有……不妨……说不定……""不妨试试"等模板号召
-18. **引导词** - 删除"也值得提""另外""值得一提的是"等冗余引导，直接陈述
-19. **鸡血收尾** - 删除"省下那几分钟""从今天开始"等励志式结尾，用具体陈述收束
-
-## 个性与灵魂
-
-除了去除 AI 模式，还要注入真实感：
-- 有观点 - 不要只报告事实，对它们做出反应
-- 变化节奏 - 短促有力的句子和长句混合使用
-- 承认复杂性 - 真实的人有复杂的感受
-- 允许一些混乱 - 完美的结构感觉像算法
-- 使用具体细节而不是模糊的主张
+## 必守
+- 第一行直接进入文章正文；不要修改说明、分析、表格、评价原文。
+- 不要说“原文本身”“这篇文章”“我做了润色”“主要是把……”。
+- 保留核心信息和 Markdown 图片行 `![...](...)` 的原位置。
+- 少用破折号，优先用逗号、句号、冒号或括号。
+- 去掉公式感：标志着、彰显、至关重要、此外、深入探讨、不仅而且、不是而是、模板化号召。
+- Sherry 保留温和、清楚、分层表达；short_science 保留短、直接、具体。
 {ref_section}
 ## 待处理的文章（{style_name} 风格）
-{text[:12000]}
+{text[:8000]}
 
 ## 输出要求
 - 直接输出修改后的完整文章（全文）
@@ -1050,7 +1027,7 @@ def _humanize(text, style_name, examples=None):
 {style_specific_output_rules}
 
 ## 待润色文章（{style_name} 风格）
-{text[:12000]}
+{text[:8000]}
 """
         cleaned = _clean_humanizer_result(claude_client.call(retry_prompt))
         if _is_valid_humanized_article(cleaned, text):

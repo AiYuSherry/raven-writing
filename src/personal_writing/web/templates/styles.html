@@ -22,10 +22,25 @@
             <input type="text" id="newStyleName" placeholder="风格标识（英文/拼音，如 my_style）" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;margin-bottom:6px;outline:none;">
             <input type="text" id="newStyleDisplay" placeholder="显示名称（如 我的风格）" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;margin-bottom:6px;outline:none;">
             <input type="text" id="newStyleDesc" placeholder="简短描述" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;margin-bottom:6px;outline:none;">
+            <div style="font-size:13px;color:#888;margin:6px 0 4px;">参考素材文件（会自动解读成文字）</div>
+            <input type="file" id="draftExampleFiles" style="display:none" multiple onchange="handleDraftExampleFiles(event)">
+            <div class="file-drop" onclick="document.getElementById('draftExampleFiles').click()" style="margin-bottom:6px;">📎 点击上传参考文件（md/txt/csv/xlsx 等）</div>
+            <div id="draftExampleFileList" style="display:none;margin-bottom:6px;"></div>
+            <textarea id="newStyleExampleContent" rows="6" placeholder="粘贴一篇参考素材 / 代表文章..." style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;resize:vertical;font-family:inherit;margin-bottom:6px;"></textarea>
+            <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <input type="text" id="newStyleExampleTitle" placeholder="标题（可选）" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;">
+                <input type="text" id="newStyleExampleSource" placeholder="来源（可选）" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;">
+                <button class="btn btn-secondary" type="button" onclick="addDraftExample()">添加</button>
+            </div>
+            <div id="draftExampleList" style="display:none;margin-bottom:8px;"></div>
             <textarea id="newStylePrompt" rows="6" placeholder="写作指令 / Prompt 模板（从 skill 中复制）" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;resize:vertical;font-family:inherit;"></textarea>
         </div>
-        <button class="btn" onclick="createStyle()">创建</button>
-        <button class="btn btn-secondary" onclick="hideCreateForm()" style="margin-left:6px;">取消</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+            <button class="btn btn-secondary" type="button" onclick="generatePromptFromExamples()">根据素材生成 Prompt</button>
+            <span id="draftPromptStatus" style="font-size:13px;color:#888;"></span>
+        </div>
+        <button class="btn" type="button" onclick="createStyle()">创建</button>
+        <button class="btn btn-secondary" type="button" onclick="hideCreateForm()" style="margin-left:6px;">取消</button>
     </div>
 
     <div id="nuwaPane" style="display:none;">
@@ -157,7 +172,10 @@ document.querySelectorAll('.edit-inline').forEach(el => {
         });
     });
 });
-// ─── Create style from skill ───
+// ─── Create style from skill/materials ───
+let draftStyleFiles = [];
+let draftExamples = [];
+
 function showCreateForm() {
     document.getElementById('createForm').style.display = 'block';
     document.getElementById('createBtn').style.display = 'none';
@@ -190,6 +208,101 @@ document.getElementById('skillFile').addEventListener('change', function(e) {
     };
     reader.readAsText(file, 'UTF-8');
 });
+
+function handleDraftExampleFiles(event) {
+    const files = Array.from((event && event.target && event.target.files) || []);
+    files.forEach(file => {
+        const exists = draftStyleFiles.some(f => f.name === file.name && f.size === file.size);
+        if (exists) return;
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            draftStyleFiles.push({
+                name: file.name,
+                dataUrl: ev.target.result,
+                size: file.size || 0
+            });
+            renderDraftExampleFiles();
+        };
+        reader.readAsDataURL(file);
+    });
+    event.target.value = '';
+}
+
+function renderDraftExampleFiles() {
+    const container = document.getElementById('draftExampleFileList');
+    if (!draftStyleFiles.length) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+    container.style.display = 'block';
+    container.innerHTML = '<div style="font-size:12px;color:#888;margin-bottom:6px;">📎 已附加 ' + draftStyleFiles.length + ' 个参考文件</div>';
+    const list = document.createElement('div');
+    container.appendChild(list);
+    draftStyleFiles.forEach((file, idx) => {
+        const tag = document.createElement('div');
+        tag.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background:#f0f0f0;border:1px solid #ddd;border-radius:6px;margin:0 4px 4px 0;font-size:13px;';
+        tag.innerHTML = '📄 ' + escHtml(file.name) +
+            ' <span style="font-size:11px;color:#999;">(' + Math.max(1, Math.round((file.size || 0) / 1024)) + 'KB)</span>' +
+            ' <span style="cursor:pointer;color:#c00;margin-left:4px;" onclick="removeDraftExampleFile(' + idx + ')">✕</span>';
+        list.appendChild(tag);
+    });
+}
+
+function removeDraftExampleFile(index) {
+    draftStyleFiles.splice(index, 1);
+    renderDraftExampleFiles();
+}
+
+function addDraftExample() {
+    const contentEl = document.getElementById('newStyleExampleContent');
+    const titleEl = document.getElementById('newStyleExampleTitle');
+    const sourceEl = document.getElementById('newStyleExampleSource');
+    const content = contentEl.value.trim();
+    if (!content) { showToast('❓ 请先粘贴一篇素材'); return; }
+    const title = titleEl.value.trim() || ('参考素材 ' + (draftExamples.length + 1));
+    const source = sourceEl.value.trim();
+    draftExamples.push({title, content, source});
+    contentEl.value = '';
+    titleEl.value = '';
+    sourceEl.value = '';
+    renderDraftExampleList();
+    showToast('✅ 已添加到素材列表');
+}
+
+function renderDraftExampleList() {
+    const container = document.getElementById('draftExampleList');
+    if (!draftExamples.length) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+    container.style.display = 'block';
+    container.innerHTML = '';
+    draftExamples.forEach((example, idx) => {
+        const item = document.createElement('div');
+        item.style.cssText = 'border:1px solid #ddd;border-radius:8px;background:#fafafa;padding:10px 12px;margin-bottom:8px;';
+        item.innerHTML =
+            '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">' +
+            '<div style="flex:1;min-width:0;">' +
+            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">' +
+            '<div style="font-weight:650;font-size:14px;">' + escHtml(example.title) + '</div>' +
+            '<span style="font-size:12px;color:#888;">' + (example.content || '').length + ' 字</span>' +
+            (example.source ? '<span style="font-size:12px;color:#888;">来源：' + escHtml(example.source) + '</span>' : '') +
+            '</div>' +
+            '<div style="font-size:13px;color:#444;white-space:pre-wrap;line-height:1.6;max-height:132px;overflow:auto;">' + escHtml(example.content) + '</div>' +
+            '</div>' +
+            '<button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;flex-shrink:0;" type="button" onclick="removeDraftExample(' + idx + ')">✕</button>' +
+            '</div>';
+        container.appendChild(item);
+    });
+}
+
+function removeDraftExample(index) {
+    draftExamples.splice(index, 1);
+    renderDraftExampleList();
+}
+
 function createStyle() {
     const name = document.getElementById('newStyleName').value.trim();
     const display_name = document.getElementById('newStyleDisplay').value.trim();
@@ -208,6 +321,43 @@ function createStyle() {
             showToast('❌ ' + (d.message || '创建失败'));
         }
     }).catch(() => showToast('❌ 请求失败'));
+}
+
+function generatePromptFromExamples() {
+    const display_name = document.getElementById('newStyleDisplay').value.trim();
+    const description = document.getElementById('newStyleDesc').value.trim();
+    const prompt_template = document.getElementById('newStylePrompt').value.trim();
+    const pendingContent = document.getElementById('newStyleExampleContent').value.trim();
+    const pendingTitle = document.getElementById('newStyleExampleTitle').value.trim();
+    const pendingSource = document.getElementById('newStyleExampleSource').value.trim();
+    if (pendingContent) {
+        draftExamples.push({
+            title: pendingTitle || ('参考素材 ' + (draftExamples.length + 1)),
+            content: pendingContent,
+            source: pendingSource
+        });
+        document.getElementById('newStyleExampleContent').value = '';
+        document.getElementById('newStyleExampleTitle').value = '';
+        document.getElementById('newStyleExampleSource').value = '';
+        renderDraftExampleList();
+    }
+    const examples = draftExamples.slice();
+    const status = document.getElementById('draftPromptStatus');
+    const file_payloads = draftStyleFiles.map(f => ({name: f.name, dataUrl: f.dataUrl, size: f.size || 0}));
+    if (!examples.length && !file_payloads.length) { showToast('❓ 请先粘贴参考素材或上传文件'); return; }
+    status.textContent = '⏳ 正在根据素材生成 Prompt...';
+    fetch('/api/v1/styles/draft-optimize', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({display_name, description, prompt_template, examples, file_payloads})
+    }).then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            document.getElementById('newStylePrompt').value = d.prompt_template || '';
+            status.textContent = '✅ Prompt 已生成，可以继续微调后创建';
+        } else {
+            status.textContent = '❌ ' + (d.message || '生成失败');
+        }
+    }).catch(() => status.textContent = '❌ 请求失败');
 }
 
 let nuwaFilePayloads = [];

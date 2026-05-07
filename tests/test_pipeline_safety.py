@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from personal_writing.core import pipeline
 
@@ -49,6 +50,27 @@ class PipelineSafetyTests(unittest.TestCase):
         cleaned = pipeline._mechanical_hard_cleanup(text)
         self.assertNotIn("——", cleaned)
         self.assertNotIn("不是", cleaned)
+
+    def test_humanizer_prompt_stays_compact(self):
+        original = "折腾了一晚上 cc-connect，把 AI 接上不同的聊天软件。体验差太多了。"
+        captured = {}
+
+        def fake_call(prompt):
+            captured["prompt"] = prompt
+            return original
+
+        long_skill = "\n".join([f"- AI 写作规则 {i}: 删除公式感和破折号" for i in range(300)])
+        with mock.patch.object(pipeline, "_load_humanizer_skill", return_value=long_skill), \
+             mock.patch.object(pipeline.claude_client, "is_available", return_value=True), \
+             mock.patch.object(pipeline.claude_client, "call", side_effect=fake_call):
+            result = pipeline._humanize(original, "short_science", examples=[
+                {"title": "参考", "content": "这是一个很长的参考。" * 500}
+            ])
+
+        self.assertEqual(result, original)
+        self.assertLess(len(captured["prompt"]), 9000)
+        self.assertNotIn("下面是旧版内置规则", captured["prompt"])
+        self.assertLessEqual(captured["prompt"].count("这是一个很长的参考。"), 16)
 
 
 if __name__ == "__main__":

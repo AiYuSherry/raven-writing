@@ -15,7 +15,7 @@ from ..core import pipeline, nuwa_distiller
 from ..core.citation_verifier import verify_citations, format_report as format_citation_report
 from ..core.citation_formatter import format_article_footnotes
 from ..core.input_reader import read_spreadsheet
-from ..core.pipeline import _clean_output, _format_rules_for_style, _strip_daily_headings, looks_like_edit_report, DAILY_FINAL_GUARDRAILS, STRICT_ARTICLE_OUTPUT_RULES
+from ..core.pipeline import _clean_output, _format_rules_for_style, _strip_daily_headings, looks_like_edit_report, DAILY_FINAL_GUARDRAILS, STRICT_ARTICLE_OUTPUT_RULES, _sanitize_style_prompt_template
 from ..core.style_engine import registry as style_registry
 from ..core.obsidian_bridge import archive_to_works
 from ..db.repository import MaterialRepo, SessionRepo, ArticleRepo, HeadlineFeedbackRepo, HeadlineLibraryRepo, HeadlineAnalysisRepo, HeadlineFormulaRepo, CommonPhraseRepo, StyleRepo, StyleExampleRepo, StatsRepo, ReviewAnalysisRepo, HeadlineGenerationRepo, MaterialLibraryRepo, MaterialFolderRepo, LibraryDocumentRepo, DocumentChunkRepo
@@ -1284,10 +1284,127 @@ def create_app():
         name = data["name"].strip().lower().replace(" ", "_")
         if StyleRepo.get_by_name(name):
             return jsonify({"status": "error", "message": "风格标识已存在"}), 400
-        config = {"prompt_template": data.get("prompt_template", ""), "category": data.get("category", "custom")}
+        config = {
+            "prompt_template": _sanitize_style_prompt_template(data.get("prompt_template", "")),
+            "category": data.get("category", "custom"),
+        }
         StyleRepo.create(name, data["display_name"], data.get("description", ""), config, is_builtin=0)
         style_registry.reload()
         return jsonify({"status": "ok"})
+
+    @app.route("/api/v1/styles/draft-optimize", methods=["POST"])
+    def api_optimize_draft_style():
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "缺少参数"}), 400
+        display_name = (data.get("display_name", "") or "").strip()
+        description = (data.get("description", "") or "").strip()
+        current_prompt = (data.get("prompt_template", "") or "").strip()
+        examples = data.get("examples", []) or []
+        file_payloads = data.get("file_payloads", []) or []
+
+        valid_examples = []
+        for ex in examples:
+            content = (ex.get("content", "") if isinstance(ex, dict) else "").strip()
+            if not content:
+                continue
+            valid_examples.append({
+                "title": (ex.get("title", "") if isinstance(ex, dict) else "").strip() or "无标题",
+                "content": content,
+                "source": (ex.get("source", "") if isinstance(ex, dict) else "").strip(),
+            })
+
+        extracted_files = _extract_file_payloads(file_payloads)
+        if extracted_files.strip():
+            valid_examples.append({
+                "title": "上传文件解析结果",
+                "content": extracted_files.strip(),
+                "source": "uploaded_files",
+            })
+        if not valid_examples:
+            return jsonify({"status": "error", "message": "请先粘贴参考素材或上传文件"}), 400
+
+        ref_parts = []
+        for ex in valid_examples[:8]:
+            ref_parts.append(f"--- {ex['title']}（{len(ex['content'])}字）---\n{ex['content'][:4000]}")
+        ref_text = "\n\n".join(ref_parts)
+        style_label = display_name or "新风格"
+        seed_prompt = current_prompt or f"""# {style_label}写作风格
+
+你正在模仿一种个人写作声音。先用 2-3 句话定义这个写作者是谁、在什么状态下写作、作品读起来像什么。
+
+## 核心价值观
+
+## 素材理解与选题判断
+
+## 输出形态（文章/歌词/诗歌等）
+
+## 语言风格
+
+## 结构特征
+
+## 具体细节的使用
+
+## 情绪表达方式
+
+## 节奏与段落
+
+## 推荐表达
+
+## 绝对禁区
+
+## 输出要求
+"""
+        prompt = f"""你是一位写作风格 Skill 作者。你的任务不是总结改进点，而是基于参考素材，输出一份完整可直接用于写作生成的风格 prompt。
+
+风格名称：{style_label}
+补充描述：{description or "无"}
+
+当前草稿 prompt：
+{seed_prompt}
+
+参考素材：
+{ref_text}
+
+请严格按下面骨架输出完整 prompt，保留所有标题：
+
+# {style_label}写作风格
+
+你正在模仿一种个人写作声音。先用 2-3 句话定义这个写作者是谁、在什么状态下写作、文章读起来像什么。
+
+## 核心价值观
+
+## 素材理解与选题判断
+
+## 输出形态（文章/歌词/诗歌等）
+
+## 语言风格
+
+## 结构特征
+
+## 具体细节的使用
+
+## 情绪表达方式
+
+## 节奏与段落
+
+## 推荐表达
+
+## 绝对禁区
+
+## 输出要求
+
+要求：
+- 必须从参考素材里归纳，不要空泛。
+- 直接输出完整 prompt，不要解释，不要写“主要改进点”。
+- 不要创建文件。"""
+        try:
+            result = _sanitize_style_prompt_template(claude_call(prompt).strip())
+            if len(result) > 14000:
+                result = result[:14000].rstrip()
+            return jsonify({"status": "ok", "prompt_template": result})
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
 
     @app.route("/api/v1/skills/distill", methods=["POST"])
     def api_distill_skill():
