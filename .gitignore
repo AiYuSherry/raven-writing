@@ -1,4 +1,8 @@
 # Personal data and materials
+.env
+.env.*
+output_prompt.md
+skills/wechat-typeset-pro/config.json
 data/*
 !data/material_library/
 data/material_library/*

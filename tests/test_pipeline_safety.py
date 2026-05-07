@@ -72,6 +72,64 @@ class PipelineSafetyTests(unittest.TestCase):
         self.assertNotIn("下面是旧版内置规则", captured["prompt"])
         self.assertLessEqual(captured["prompt"].count("这是一个很长的参考。"), 16)
 
+    def test_passthrough_style_detection(self):
+        class DummyStyle:
+            name = "什么都不改"
+            display_name = "什么都不改"
+            description = "用于排版推送"
+
+            def get_config(self):
+                return {"prompt_template": "对于输入的内容，不做任何修改"}
+
+        self.assertTrue(pipeline._is_passthrough_style(DummyStyle()))
+
+    def test_passthrough_article_keeps_content(self):
+        content = "# 标题\n\n第一段。\n\n![图](a.png)\n\n第二段。"
+        article = pipeline._passthrough_article(content, "")
+        self.assertEqual(article["content"], content)
+        self.assertEqual(article["title"], "标题")
+        self.assertTrue(article["passthrough"])
+        self.assertIn({"headline": "标题", "formula": "原文标题"}, article["headline_candidates"])
+
+    def test_passthrough_title_falls_back_to_source_title(self):
+        article = pipeline._passthrough_article("\n\n![图](a.png)\n\n" + ("很长" * 60), "source.md")
+        self.assertEqual(article["title"], "source.md")
+
+    def test_passthrough_generates_local_tutorial_headlines(self):
+        article = pipeline._passthrough_article(
+            "# 手把手教会你：Agent 接入 Telegram\n\n正文。",
+            "",
+        )
+        headlines = [c["headline"] for c in article["headline_candidates"]]
+        self.assertIn("Agent接入Telegram教程", headlines)
+        self.assertIn("怎么Agent接入Telegram", headlines)
+
+    def test_headline_prompt_requires_plain_tutorial_titles(self):
+        captured = {}
+
+        def fake_call(prompt):
+            captured["prompt"] = prompt
+            return """## 标题候选
+1. 怎么把Claude接到Telegram — 公式：教程直说
+2. 如何用Telegram收AI消息 — 公式：教程直说
+3. Telegram接AI的方法 — 公式：教程直说
+4. 5分钟搞定AI消息桥 — 公式：干货承诺
+5. 微信发不了就换Telegram — 公式：自由创作
+"""
+
+        with mock.patch.object(pipeline.claude_client, "is_available", return_value=True), \
+             mock.patch.object(pipeline.claude_client, "call", side_effect=fake_call):
+            candidates = pipeline.generate_headline_candidates(
+                "这是一篇教程，教你把 Claude 接到 Telegram。",
+                "先配置 bot token，再设置 webhook。",
+                "custom_tutorial",
+            )
+
+        self.assertGreaterEqual(len(candidates), 5)
+        self.assertIn("教程直说", captured["prompt"])
+        self.assertIn("必须至少给 2 个", captured["prompt"])
+        self.assertEqual(candidates[0]["formula"], "教程直说")
+
 
 if __name__ == "__main__":
     unittest.main()

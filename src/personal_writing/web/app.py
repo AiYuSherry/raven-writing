@@ -18,6 +18,7 @@ from ..core.input_reader import read_spreadsheet
 from ..core.pipeline import _clean_output, _format_rules_for_style, _strip_daily_headings, looks_like_edit_report, DAILY_FINAL_GUARDRAILS, STRICT_ARTICLE_OUTPUT_RULES, _sanitize_style_prompt_template
 from ..core.style_engine import registry as style_registry
 from ..core.obsidian_bridge import archive_to_works
+from ..utils.md_to_txt import markdown_to_txt
 from ..db.repository import MaterialRepo, SessionRepo, ArticleRepo, HeadlineFeedbackRepo, HeadlineLibraryRepo, HeadlineAnalysisRepo, HeadlineFormulaRepo, CommonPhraseRepo, StyleRepo, StyleExampleRepo, StatsRepo, ReviewAnalysisRepo, HeadlineGenerationRepo, MaterialLibraryRepo, MaterialFolderRepo, LibraryDocumentRepo, DocumentChunkRepo
 from ..db.schema import get_connection
 from ..material_library import storage
@@ -50,6 +51,82 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 UPLOAD_DIR = os.path.join(_PROJECT_ROOT, "data", "uploads")
 OBSIDIAN_VAULT = os.path.expanduser("~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Obsidian Vault")
+WECHAT_CONFIG_PATH = os.path.join(_PROJECT_ROOT, "skills", "wechat-typeset-pro", "config.json")
+WECHAT_ENV_PATH = os.path.join(_PROJECT_ROOT, ".env")
+WECHAT_BACKUP_ENV_PATH = os.path.expanduser("~/.raven-writing/wechat-credentials.env")
+DEFAULT_WECHAT_CONFIG = {
+    "output_dir": "~/output/wechat-typeset-pro",
+    "vault_root": "~",
+    "image_search_paths": [],
+    "settings": {
+        "default_theme": "newspaper",
+        "auto_open_browser": True,
+    },
+    "wechat": {
+        "app_id": "",
+        "app_secret": "",
+        "author": "",
+    },
+    "cover": {
+        "output_dir": "~/output/wechat-typeset-pro/covers",
+        "image_generation_script": "",
+        "default_image": "",
+    },
+}
+
+
+def _read_env_file(path):
+    env_lines = {}
+    if not os.path.isfile(path):
+        return env_lines
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            env_lines[k.strip()] = v.strip().strip("'\"")
+    return env_lines
+
+
+def _write_env_file(path, env_lines):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        for k, v in env_lines.items():
+            f.write(f"{k}={v}\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def _load_wechat_creds():
+    creds = {"app_id": "", "app_secret": "", "author": ""}
+    if os.path.isfile(WECHAT_CONFIG_PATH):
+        with open(WECHAT_CONFIG_PATH, encoding="utf-8") as f:
+            cfg = json.load(f)
+            creds.update(cfg.get("wechat", {}) or {})
+
+    for env_path in (WECHAT_ENV_PATH, WECHAT_BACKUP_ENV_PATH):
+        env_creds = _read_env_file(env_path)
+        if not creds["app_id"]:
+            creds["app_id"] = env_creds.get("WECHAT_APP_ID", "") or env_creds.get("WECHAT_APPID", "")
+        if not creds["app_secret"]:
+            creds["app_secret"] = env_creds.get("WECHAT_APP_SECRET", "") or env_creds.get("WECHAT_APPSECRET", "")
+        if not creds["author"]:
+            creds["author"] = env_creds.get("WECHAT_AUTHOR", "")
+
+    return creds
+
+
+def _save_wechat_backup(app_id, app_secret, author):
+    backup_lines = {
+        "WECHAT_APP_ID": app_id,
+        "WECHAT_APP_SECRET": app_secret,
+    }
+    if author:
+        backup_lines["WECHAT_AUTHOR"] = author
+    _write_env_file(WECHAT_BACKUP_ENV_PATH, backup_lines)
 
 
 def _extract_title(raw_content):
@@ -704,6 +781,10 @@ def create_app():
         s = style_registry.list_info()
         return render_template("styles.html", styles=s)
 
+    @app.route("/format")
+    def format_page():
+        return render_template("format.html")
+
     @app.route("/styles/<name>")
     def style_detail_page(name):
         style_obj = style_registry.get(name)
@@ -795,28 +876,7 @@ def create_app():
     @app.route("/settings")
     def settings_page():
         """设置页面：微信凭证配置。"""
-        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "skills", "wechat-typeset-pro", "config.json")
-        creds = {"app_id": "", "app_secret": "", "author": ""}
-        if os.path.isfile(config_path):
-            with open(config_path, encoding="utf-8") as f:
-                cfg = json.load(f)
-                creds = cfg.get("wechat", creds)
-        # Also read from .env
-        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), ".env")
-        env_creds = {}
-        if os.path.isfile(env_path):
-            with open(env_path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if "=" in line:
-                        k, v = line.split("=", 1)
-                        env_creds[k.strip()] = v.strip().strip("'\"")
-        if not creds["app_id"]:
-            creds["app_id"] = env_creds.get("WECHAT_APP_ID", "")
-        if not creds["app_secret"]:
-            creds["app_secret"] = env_creds.get("WECHAT_APP_SECRET", "")
-        if not creds["author"]:
-            creds["author"] = env_creds.get("WECHAT_AUTHOR", "")
+        creds = _load_wechat_creds()
         return render_template("settings.html", creds=creds)
 
     @app.route("/session/<int:session_id>")
@@ -842,6 +902,24 @@ def create_app():
     @app.route("/api/v1/styles")
     def api_styles():
         return jsonify(style_registry.list_info())
+
+    @app.route("/api/v1/format/markdown-to-txt", methods=["POST"])
+    def api_markdown_to_txt():
+        data = request.get_json() or {}
+        return jsonify({"status": "ok", "text": markdown_to_txt(data.get("text", ""))})
+
+    @app.route("/api/v1/format/archive", methods=["POST"])
+    def api_archive_format_text():
+        data = request.get_json() or {}
+        content = _clean_output(data.get("text", ""))
+        if not content.strip():
+            return jsonify({"status": "error", "message": "内容不能为空"}), 400
+        title = (data.get("title") or _extract_title(content) or "无标题").strip()
+        try:
+            path = archive_to_works(content, title, "格式转换")
+            return jsonify({"status": "ok", "path": path, "title": title})
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
 
     @app.route("/api/v1/libraries")
     def api_libraries():
@@ -2002,6 +2080,94 @@ def create_app():
 
         return gallery_html, md_path, gallery_dir
 
+    def _publish_with_theme(content, title, theme):
+        """Format with one theme and push the generated directory to WeChat draft."""
+        md_content = _enhance_markdown(content, title)
+        safe_title = re.sub(r'[^\w\u4e00-\u9fff-]', '_', title)[:40]
+        fname = f"pub_{safe_title}.md"
+        md_path = os.path.join(SAVE_DIR, fname)
+        os.makedirs(SAVE_DIR, exist_ok=True)
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(md_content)
+
+        format_script = os.path.join(_PROJECT_ROOT, "skills", "wechat-typeset-pro", "scripts", "format.py")
+        if not os.path.isfile(format_script):
+            raise FileNotFoundError("排版工具未找到")
+        result = subprocess.run(
+            ["python3", format_script, "--input", md_path, "--theme", theme, "--no-open"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr[:500] if result.stderr else str(result))
+
+        file_stem = re.sub(r"-(公众号|小红书|微博)$", "", os.path.splitext(fname)[0])
+        article_dir = os.path.join(SAVE_DIR, file_stem)
+        publish_script = os.path.join(_PROJECT_ROOT, "skills", "wechat-typeset-pro", "scripts", "publish.py")
+        if not os.path.isfile(publish_script):
+            raise FileNotFoundError("发布工具未找到")
+
+        default_cover = os.path.expanduser(
+            "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Obsidian Vault"
+            ""
+        )
+        cmd = ["python3", publish_script, "--dir", article_dir]
+        if os.path.isfile(default_cover):
+            cmd += ["--cover", default_cover]
+
+        pub_result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if pub_result.returncode != 0:
+            raise RuntimeError(pub_result.stderr[:500] if pub_result.stderr else str(pub_result))
+        return {
+            "output": pub_result.stdout[:3000],
+            "article_dir": article_dir,
+            "md_path": md_path,
+        }
+
+    @app.route("/api/v1/format/typeset", methods=["POST"])
+    def api_typeset_format_text():
+        data = request.get_json() or {}
+        content = _clean_output(data.get("text", ""))
+        if not content.strip():
+            return jsonify({"status": "error", "message": "内容不能为空"}), 400
+        title = (data.get("title") or _extract_title(content) or "无标题").strip()
+        try:
+            gallery_html, md_path, gallery_dir = _typeset_gallery(content, title)
+            if not gallery_html:
+                return jsonify({"status": "error", "message": "画廊未生成"}), 500
+            return jsonify({
+                "status": "ok",
+                "html": gallery_html,
+                "article_dir": gallery_dir,
+                "md_path": md_path,
+                "title": title,
+            })
+        except subprocess.TimeoutExpired:
+            return jsonify({"status": "error", "message": "排版超时"}), 500
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+    @app.route("/api/v1/format/publish", methods=["POST"])
+    def api_publish_format_text():
+        data = request.get_json() or {}
+        content = _clean_output(data.get("text", ""))
+        if not content.strip():
+            return jsonify({"status": "error", "message": "内容不能为空"}), 400
+        title = (data.get("title") or _extract_title(content) or "无标题").strip()
+        theme = (data.get("theme") or "terracotta").strip()
+        try:
+            published = _publish_with_theme(content, title, theme)
+            return jsonify({
+                "status": "ok",
+                "output": published["output"],
+                "article_dir": published["article_dir"],
+                "md_path": published["md_path"],
+                "title": title,
+            })
+        except subprocess.TimeoutExpired:
+            return jsonify({"status": "error", "message": "发布超时"}), 500
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+
     @app.route("/api/v1/article/<int:article_id>/typeset", methods=["POST"])
     def api_typeset_article(article_id):
         """排版：运行 skill gallery 模式，打开主题画廊供选择。"""
@@ -2044,50 +2210,11 @@ def create_app():
         title = article.get("headline_selected") or article.get("title", "") or "无标题"
         content = _clean_output(content)
 
-        # 1. Format with chosen theme
         try:
-            md_content = _enhance_markdown(content, title)
-            import re
-            safe_title = re.sub(r'[^\w\u4e00-\u9fff-]', '_', title)[:40]
-            fname = f"pub_{safe_title}.md"
-            md_path = os.path.join(SAVE_DIR, fname)
-            with open(md_path, "w", encoding="utf-8") as f:
-                f.write(md_content)
-
-            format_script = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "skills", "wechat-typeset-pro", "scripts", "format.py")
-            result = subprocess.run(
-                ["python3", format_script, "--input", md_path, "--theme", theme, "--no-open"],
-                capture_output=True, text=True, timeout=60,
-            )
-            if result.returncode != 0:
-                raise RuntimeError(result.stderr[:500] if result.stderr else str(result))
-        except subprocess.TimeoutExpired:
-            return jsonify({"status": "error", "message": "排版超时"}), 500
-        except Exception as e:
-            return jsonify({"status": "error", "message": f"排版失败: {e}"}), 500
-
-        # 2. Push to WeChat draft
-        file_stem = re.sub(r"-(公众号|小红书|微博)$", "", os.path.splitext(fname)[0])
-        article_dir = os.path.join(SAVE_DIR, file_stem)
-        publish_script = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "skills", "wechat-typeset-pro", "scripts", "publish.py")
-        if not os.path.isfile(publish_script):
-            return jsonify({"status": "error", "message": "发布工具未找到"}), 500
-
-        default_cover = os.path.expanduser(
-            "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Obsidian Vault"
-            ""
-        )
-        cmd = ["python3", publish_script, "--dir", article_dir]
-        if os.path.isfile(default_cover):
-            cmd += ["--cover", default_cover]
-
-        try:
-            pub_result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            if pub_result.returncode != 0:
-                raise RuntimeError(pub_result.stderr[:500] if pub_result.stderr else str(pub_result))
+            published = _publish_with_theme(content, title, theme)
             return jsonify({
                 "status": "ok",
-                "output": pub_result.stdout[:3000],
+                "output": published["output"],
             })
         except subprocess.TimeoutExpired:
             return jsonify({"status": "error", "message": "发布超时"}), 500
@@ -2220,37 +2347,30 @@ def create_app():
             return jsonify({"status": "error", "message": "APPID 和 AppSecret 不能为空"}), 400
 
         # Save to config.json
-        skill_config = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "skills", "wechat-typeset-pro", "config.json")
-        if os.path.isfile(skill_config):
-            with open(skill_config, encoding="utf-8") as f:
+        cfg = dict(DEFAULT_WECHAT_CONFIG)
+        if os.path.isfile(WECHAT_CONFIG_PATH):
+            with open(WECHAT_CONFIG_PATH, encoding="utf-8") as f:
                 cfg = json.load(f)
-            cfg.setdefault("wechat", {})["app_id"] = app_id
-            cfg.setdefault("wechat", {})["app_secret"] = app_secret
-            if author:
-                cfg["wechat"]["author"] = author
-            with open(skill_config, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        cfg.setdefault("wechat", {})["app_id"] = app_id
+        cfg.setdefault("wechat", {})["app_secret"] = app_secret
+        if author:
+            cfg["wechat"]["author"] = author
+        os.makedirs(os.path.dirname(WECHAT_CONFIG_PATH), exist_ok=True)
+        with open(WECHAT_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        try:
+            os.chmod(WECHAT_CONFIG_PATH, 0o600)
+        except OSError:
+            pass
 
         # Save to project .env
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        env_path = os.path.join(project_root, ".env")
-
-        # Read existing, update keys
-        env_lines = {}
-        if os.path.isfile(env_path):
-            with open(env_path, encoding="utf-8") as f:
-                for line in f:
-                    if "=" in line:
-                        k, v = line.strip().split("=", 1)
-                        env_lines[k.strip()] = v.strip()
+        env_lines = _read_env_file(WECHAT_ENV_PATH)
         env_lines["WECHAT_APP_ID"] = app_id
         env_lines["WECHAT_APP_SECRET"] = app_secret
         if author:
             env_lines["WECHAT_AUTHOR"] = author
-
-        with open(env_path, "w", encoding="utf-8") as f:
-            for k, v in env_lines.items():
-                f.write(f'{k}="{v}"\n')
+        _write_env_file(WECHAT_ENV_PATH, env_lines)
+        _save_wechat_backup(app_id, app_secret, author)
 
         # Verify: try to get access_token
         import urllib.request

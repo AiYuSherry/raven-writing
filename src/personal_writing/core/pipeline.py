@@ -253,6 +253,124 @@ def _looks_like_interactive_reply(text):
     return len(question_lines) + len(bullet_questions) >= 2
 
 
+def _is_passthrough_style(style):
+    """Return True for styles meant to keep input unchanged for fast publishing."""
+    if style is None:
+        return False
+    config = style.get_config() if hasattr(style, "get_config") else {}
+    if config.get("passthrough") is True or config.get("direct_output") is True:
+        return True
+    probe = "\n".join([
+        str(getattr(style, "name", "") or ""),
+        str(getattr(style, "display_name", "") or ""),
+        str(getattr(style, "description", "") or ""),
+        str(config.get("prompt_template", "") or ""),
+    ])
+    compact = re.sub(r"\s+", "", probe)
+    markers = (
+        "什么都不改",
+        "不做任何修改",
+        "不做修改",
+        "不要修改",
+        "原样输出",
+        "保持原样",
+        "直接输出原文",
+        "排版直通",
+        "直通",
+    )
+    return any(marker in compact for marker in markers)
+
+
+def _extract_passthrough_title(content, fallback=""):
+    """Extract a local title for passthrough output without changing the body."""
+    for line in (content or "").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        if text.startswith("!"):
+            continue
+        text = re.sub(r"^#{1,6}\s+", "", text).strip()
+        text = re.sub(r"^\s*[-*+]\s+", "", text).strip()
+        text = re.sub(r"^[《「“\"](.+?)[》」”\"]$", r"\1", text).strip()
+        if text and len(text) <= 80:
+            return text
+        break
+    fallback = (fallback or "").strip()
+    return fallback[:80] if fallback else ""
+
+
+def _passthrough_article(content, title=""):
+    """Build a result article without model calls, humanize, or headline generation."""
+    title = _extract_passthrough_title(content, title)
+    return {
+        "title": title,
+        "content": (content or "").strip(),
+        "formula": "",
+        "headline_candidates": _local_passthrough_headlines(content, title),
+        "passthrough": True,
+    }
+
+
+def _local_passthrough_headlines(content, title=""):
+    """Generate fast local headline candidates for passthrough/tutorial drafts."""
+    text = re.sub(r"\s+", " ", content or "").strip()
+    base = (title or _extract_passthrough_title(content, "")).strip()
+    candidates = []
+
+    def add(headline, formula="教程直说"):
+        headline = re.sub(r"\s+", "", (headline or "").strip())
+        headline = re.sub(r"[：:，,。.!！?？]+$", "", headline)
+        if not headline or len(headline) > 20:
+            return
+        if headline not in [c["headline"] for c in candidates]:
+            candidates.append({"headline": headline, "formula": formula})
+
+    if base:
+        add(base, "原文标题")
+
+    subject = ""
+    title_text = base or text[:80]
+    patterns = [
+        r"(?:手把手教会你|教你|教程[:：]?|如何|怎么|把)([^。！？\n]{2,30}?)(?:教程|方法|流程|步骤|$)",
+        r"([^。！？\n]{2,30}?)(?:教程|设置方法|接入方法|全流程)",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, title_text)
+        if m:
+            subject = m.group(1).strip(" ：:，,。.!！?？")
+            break
+
+    if not subject:
+        pairs = [
+            ("Agent", "Telegram"),
+            ("Claude", "Telegram"),
+            ("Claude Code", "Telegram"),
+            ("AI", "Telegram"),
+            ("Agent", "微信"),
+            ("Claude", "微信"),
+        ]
+        for left, right in pairs:
+            if left in text and right in text:
+                subject = f"{left}接入{right}"
+                break
+
+    if subject:
+        add(f"{subject}教程")
+        add(f"怎么{subject}")
+        add(f"{subject}全流程")
+        add(f"{subject}设置方法")
+
+    if len(candidates) < 5 and "Telegram" in text:
+        add("Telegram接Agent教程")
+        add("Agent接入Telegram")
+        add("配置TelegramAgent")
+
+    if len(candidates) < 5:
+        add("这篇教程教什么", "教程直说")
+
+    return candidates[:10]
+
+
 DAILY_FINAL_GUARDRAILS = """## 日常风格最终覆盖规则
 这些规则优先级最高，如果和前文任何 prompt 冲突，以这里为准。
 - 这不是公众号长文，不是 Sherry 风格，不要写成观点文、分析文、游记攻略或城市评价。
@@ -443,8 +561,15 @@ def write(raw_input, style_names=None, library_ids=None, retrieval_query="", lib
     if style_names is None or len(style_names) == 0:
         style_names = [s["name"] for s in style_engine.registry.list_info()]
 
+    all_passthrough = bool(style_names) and all(
+        _is_passthrough_style(style_engine.registry.get(sname))
+        for sname in style_names
+    )
+
     # 4. Create session and optional retrieval snapshot
     selected_library_ids = [int(x) for x in (library_ids or []) if str(x).strip()]
+    if all_passthrough:
+        selected_library_ids = []
     selected_folder_id = int(folder_id) if folder_id not in (None, "", 0, "0") else None
     selected_folder_name = ""
     if selected_folder_id:
@@ -500,13 +625,17 @@ def write(raw_input, style_names=None, library_ids=None, retrieval_query="", lib
             continue
 
         try:
-            article = generate_one(
-                style,
-                content,
-                evidence_pack=(evidence or {}).get("pack", ""),
-                library_mode=library_mode or "material_first",
-            )
-            candidates = generate_headline_candidates(content, article.get("content", ""), sname)
+            if _is_passthrough_style(style):
+                article = _passthrough_article(content, title)
+                candidates = []
+            else:
+                article = generate_one(
+                    style,
+                    content,
+                    evidence_pack=(evidence or {}).get("pack", ""),
+                    library_mode=library_mode or "material_first",
+                )
+                candidates = generate_headline_candidates(content, article.get("content", ""), sname)
 
             # Save article to DB
             article_id = ArticleRepo.create(
@@ -590,6 +719,7 @@ def write(raw_input, style_names=None, library_ids=None, retrieval_query="", lib
                 "footnotes": footnotes_str,
                 "formula": article.get("formula", ""),
                 "headline_candidates": candidates,
+                "passthrough": bool(article.get("passthrough")),
                 "retrieval_snapshot_id": snapshot_id,
                 "evidence": (evidence or {}).get("results", []),
                 "citation_verification": (
@@ -1104,9 +1234,15 @@ def generate_headline_candidates(content, article_text, style_name=None):
     else:
         formulas = HeadlineFormulaRepo.list_all()
 
-    formula_descs = "\n".join(
-        [f"- {f['name']}: {f['template']}（例如：{f['example']}）" for f in formulas]
-    )
+    formula_lines = [
+        f"- {f['name']}: {f['template']}（例如：{f['example']}）"
+        for f in formulas
+    ]
+    if not any(f.get("name") == "教程直说" for f in formulas):
+        formula_lines.append(
+            '- 教程直说: "如何/怎么把XX做到XX"（例如：怎么把Claude接到Telegram）'
+        )
+    formula_descs = "\n".join(formula_lines)
     saved_headlines = HeadlineLibraryRepo.list(style_name or "", limit=12)
     saved_headline_descs = "\n".join(
         [
@@ -1117,6 +1253,10 @@ def generate_headline_candidates(content, article_text, style_name=None):
     )
 
     title_tone = "标题要自然、克制，优先给出日记感、文艺感、书名感的正常标题；不要标题党，不要强行悬念。" if style_name == "daily" else "标题要自然、准确，有吸引力但不要夸张标题党。"
+    tutorial_title_rule = """
+7. 如果素材是教程、操作指南、工具配置、排版发布、桥接接入、安装设置、步骤说明，必须至少给 2 个“教程直说”类标题。
+   这种标题要让读者一眼知道本文教什么，优先写成“怎么把X接到Y”“如何用X完成Y”“X到Y的设置方法”。
+   不要只写“真香”“为什么该用”“5分钟搞定”这种不说明教程对象的标题。"""
 
     prompt = f"""根据以下素材和已生成的文章，生成至少 5 个文章标题候选。
 
@@ -1139,6 +1279,7 @@ def generate_headline_candidates(content, article_text, style_name=None):
 4. **硬性约束：每个标题必须在 20 字以内（超出则无效，会被自动丢弃）**
 5. 不要创建任何文件，不要保存到磁盘
 6. {title_tone}
+{tutorial_title_rule}
 
 请严格按以下格式输出（不要额外解释）：
 ## 标题候选

@@ -416,6 +416,7 @@ def init_db():
         ("轻微转折", '"我以为XX，后来发现XX"', '["daily", "sherry"]', '保留个人经验里的变化，但不做夸张反转', '我以为香港很好吃，后来发现只是我想多了'),
         ("时间切片", '"XX之后/之前"', '["daily", "sherry"]', '用时间节点承接回忆，适合旅行、关系、阶段总结', '离开香港之后'),
         ("安静判断", '"XX这件小事"', '["daily", "sherry"]', '把主题压低，避免标题党，适合个人随笔和轻观点', '吃饭这件小事'),
+        ("教程直说", '"如何/怎么把XX做到XX"', '["daily", "sherry", "short_science", "xiaohongshu"]', '适合教程、操作指南和工具说明，直接说明这篇文章教读者完成什么', '怎么把Claude接到Telegram'),
     ]
 
     for name, template, suitable_styles, description, example in default_formulas:

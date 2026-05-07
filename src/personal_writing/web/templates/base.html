@@ -389,6 +389,10 @@
                     <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"></path><path d="M4 12h10"></path><path d="M4 17h14"></path></svg>
                     <span>标题工坊</span>
                 </a>
+                <a href="/format" {% if request.path == '/format' %}class="current"{% endif %}>
+                    <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10"></path><path d="M4 10h16"></path><path d="M4 14h10"></path><path d="M4 18h16"></path></svg>
+                    <span>格式转换</span>
+                </a>
                 <a href="/review" {% if request.path == '/review' %}class="current"{% endif %}>
                     <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6z"></path><path d="M9 8h6"></path><path d="M9 12h6"></path><path d="M9 16h3"></path></svg>
                     <span>写作回顾</span>

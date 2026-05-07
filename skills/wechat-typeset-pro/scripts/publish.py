@@ -31,13 +31,38 @@ from dotenv import load_dotenv
 # ── 路径 ──────────────────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent
 SKILL_DIR = SCRIPT_DIR.parent
+DEFAULT_CONFIG = {
+    "output_dir": "~/output/wechat-typeset-pro",
+    "vault_root": "~",
+    "image_search_paths": [],
+    "settings": {
+        "default_theme": "newspaper",
+        "auto_open_browser": True,
+    },
+    "wechat": {
+        "app_id": "",
+        "app_secret": "",
+        "author": "",
+    },
+    "cover": {
+        "output_dir": "~/output/wechat-typeset-pro/covers",
+        "image_generation_script": "",
+        "default_image": "",
+    },
+}
 
-with open(SKILL_DIR / "config.json", encoding="utf-8") as f:
-    CONFIG = json.load(f)
+config_path = SKILL_DIR / "config.json"
+if config_path.exists():
+    with open(config_path, encoding="utf-8") as f:
+        CONFIG = {**DEFAULT_CONFIG, **json.load(f)}
+else:
+    CONFIG = DEFAULT_CONFIG
 
 # ── 环境变量加载（OpenClaw 统一配置）──────────────────────────────────
 for env_path in [
     SKILL_DIR / ".env",
+    SKILL_DIR.parents[1] / ".env",
+    Path.home() / ".raven-writing" / "wechat-credentials.env",
     Path.home() / ".openclaw" / ".env",
     Path.home() / ".workbuddy" / ".env",
 ]:

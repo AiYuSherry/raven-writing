@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>格式转换</h1>
+
+<div class="card">
+    <h2>Markdown 转 TXT</h2>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) 180px;gap:12px;margin-bottom:14px;">
+        <input id="formatTitle" placeholder="标题（可空）">
+        <select id="formatTheme">
+            <option value="terracotta">赤陶</option>
+            <option value="newspaper">报纸</option>
+            <option value="magazine">杂志</option>
+            <option value="ink">水墨</option>
+            <option value="minimal-blue">蓝白</option>
+            <option value="elegant">典雅</option>
+        </select>
+    </div>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start;">
+        <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div style="font-size:13px;color:var(--muted);font-weight:650;">原文</div>
+                <button class="btn btn-secondary" type="button" onclick="clearFormatInput()">清空</button>
+            </div>
+            <textarea id="formatInput" style="min-height:520px;font-family:var(--font-reading);" placeholder="粘贴 Markdown 内容..."></textarea>
+        </div>
+        <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
+                <div style="font-size:13px;color:var(--muted);font-weight:650;">TXT 结果</div>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-secondary" type="button" onclick="copyFormatOutput()">复制</button>
+                    <button class="btn btn-secondary" type="button" onclick="replaceFormatInput()">替换原文</button>
+                </div>
+            </div>
+            <textarea id="formatOutput" style="min-height:520px;font-family:var(--font-reading);" placeholder="转换结果会出现在这里..."></textarea>
+        </div>
+    </div>
+    <div style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <button class="btn" type="button" onclick="convertMarkdownToTxt()">转 TXT</button>
+        <button class="btn btn-secondary" type="button" onclick="typesetFormatArticle()">一键排版</button>
+        <button class="btn btn-secondary" type="button" onclick="publishFormatArticle()">推送公众号</button>
+        <button class="btn btn-secondary" type="button" onclick="archiveFormatArticle()">存档</button>
+        <button class="btn btn-secondary" type="button" onclick="typesetPublishArchive()">排版+推送+存档</button>
+        <span id="formatStatus" style="font-size:13px;color:var(--muted);"></span>
+    </div>
+</div>
+
+<script>
+function getFormatWorkingText() {
+    const output = document.getElementById('formatOutput').value || '';
+    const input = document.getElementById('formatInput').value || '';
+    return output.trim() ? output : input;
+}
+
+function getFormatTitle() {
+    return (document.getElementById('formatTitle').value || '').trim();
+}
+
+function setFormatStatus(text) {
+    document.getElementById('formatStatus').textContent = text || '';
+}
+
+function convertMarkdownToTxt() {
+    const input = document.getElementById('formatInput');
+    const output = document.getElementById('formatOutput');
+    const text = input.value || '';
+    if (!text.trim()) {
+        setFormatStatus('先粘贴内容');
+        return;
+    }
+    setFormatStatus('转换中...');
+    fetch('/api/v1/format/markdown-to-txt', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text})
+    }).then(r => r.json()).then(d => {
+        if (d.status === 'ok') {
+            output.value = d.text || '';
+            setFormatStatus('已转换');
+        } else {
+            setFormatStatus(d.message || '转换失败');
+        }
+    }).catch(() => {
+        setFormatStatus('转换失败');
+    });
+}
+
+function copyFormatOutput() {
+    const output = document.getElementById('formatOutput');
+    if (!output.value.trim()) {
+        setFormatStatus('没有可复制的结果');
+        return;
+    }
+    navigator.clipboard.writeText(output.value).then(() => {
+        setFormatStatus('已复制');
+    }).catch(() => {
+        output.select();
+        document.execCommand('copy');
+        setFormatStatus('已复制');
+    });
+}
+
+function replaceFormatInput() {
+    const input = document.getElementById('formatInput');
+    const output = document.getElementById('formatOutput');
+    if (output.value.trim()) {
+        input.value = output.value;
+        setFormatStatus('已替换原文');
+    }
+}
+
+function clearFormatInput() {
+    document.getElementById('formatInput').value = '';
+    document.getElementById('formatOutput').value = '';
+    document.getElementById('formatTitle').value = '';
+    setFormatStatus('');
+}
+
+function openTypesetGallery(data) {
+    const w = window.open('', '_blank');
+    if (!w) {
+        setFormatStatus('浏览器拦截了预览窗口');
+        return;
+    }
+    const base = data.article_dir ? '<base href="file://' + data.article_dir + '/">' : '';
+    w.document.write(data.html.replace('<head>', '<head>' + base));
+    w.document.close();
+}
+
+function typesetFormatArticle() {
+    const text = getFormatWorkingText();
+    if (!text.trim()) {
+        setFormatStatus('先粘贴内容');
+        return Promise.reject(new Error('empty'));
+    }
+    setFormatStatus('排版中...');
+    return fetch('/api/v1/format/typeset', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text, title: getFormatTitle()})
+    }).then(r => r.json()).then(d => {
+        if (d.status !== 'ok') throw new Error(d.message || '排版失败');
+        if (d.title && !getFormatTitle()) {
+            document.getElementById('formatTitle').value = d.title;
+        }
+        openTypesetGallery(d);
+        setFormatStatus('已排版');
+        return d;
+    }).catch(e => {
+        if (e.message !== 'empty') setFormatStatus(e.message || '排版失败');
+        throw e;
+    });
+}
+
+function publishFormatArticle(skipConfirm) {
+    const text = getFormatWorkingText();
+    if (!text.trim()) {
+        setFormatStatus('先粘贴内容');
+        return Promise.reject(new Error('empty'));
+    }
+    const theme = document.getElementById('formatTheme').value || 'terracotta';
+    if (!skipConfirm && !confirm('确定推送到公众号草稿箱吗？（主题: ' + theme + '）')) {
+        return Promise.reject(new Error('cancelled'));
+    }
+    setFormatStatus('推送中...');
+    return fetch('/api/v1/format/publish', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text, title: getFormatTitle(), theme})
+    }).then(r => r.json()).then(d => {
+        if (d.status !== 'ok') throw new Error(d.message || '推送失败');
+        if (d.title && !getFormatTitle()) {
+            document.getElementById('formatTitle').value = d.title;
+        }
+        setFormatStatus('已推送到草稿箱');
+        return d;
+    }).catch(e => {
+        if (e.message !== 'empty' && e.message !== 'cancelled') setFormatStatus(e.message || '推送失败');
+        throw e;
+    });
+}
+
+function archiveFormatArticle() {
+    const text = getFormatWorkingText();
+    if (!text.trim()) {
+        setFormatStatus('先粘贴内容');
+        return Promise.reject(new Error('empty'));
+    }
+    setFormatStatus('存档中...');
+    return fetch('/api/v1/format/archive', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text, title: getFormatTitle()})
+    }).then(r => r.json()).then(d => {
+        if (d.status !== 'ok') throw new Error(d.message || '存档失败');
+        if (d.title && !getFormatTitle()) {
+            document.getElementById('formatTitle').value = d.title;
+        }
+        setFormatStatus('已存档');
+        return d;
+    }).catch(e => {
+        if (e.message !== 'empty') setFormatStatus(e.message || '存档失败');
+        throw e;
+    });
+}
+
+function typesetPublishArchive() {
+    const theme = document.getElementById('formatTheme').value || 'terracotta';
+    if (!confirm('确定排版、推送公众号草稿箱并存档吗？（主题: ' + theme + '）')) return;
+    typesetFormatArticle()
+        .then(() => publishFormatArticle(true))
+        .then(() => archiveFormatArticle())
+        .then(() => setFormatStatus('排版、推送、存档完成'))
+        .catch(e => {
+            if (e.message !== 'cancelled' && e.message !== 'empty') {
+                setFormatStatus(e.message || '处理失败');
+            }
+        });
+}
+</script>
+{% endblock %}
